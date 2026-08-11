@@ -67,4 +67,4 @@ Claude-era 紀錄顯示四支工具曾於 2026-07-17 對真實資料執行；這
 - 建立自動化測試與可重播 fixtures，降低對即時端點的驗證依賴。
 - 每年颱風季與除權息季前重新驗證資料解析器。
 - 若未來評估券商 API 或自動下單，應視為獨立、高風險專案決策，不是現有腳本的自然延伸。
-- GitHub issue tracker 尚未可用，因 repository 目前沒有 remote；相關規範見 `docs/agents/issue-tracker.md`。
+- Private GitHub repository 與 issue tracker 位於 `tonyls0831/taoli`，本機以 `origin` 連接；相關規範見 `docs/agents/issue-tracker.md`。

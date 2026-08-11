@@ -95,7 +95,8 @@ project context; the tracked files above are the durable source.
 ## Git and external writes
 
 - Preserve unrelated user changes and inspect the diff before committing.
-- This repository currently has no Git remote. Do not infer a GitHub destination.
+- The private GitHub repository is `tonyls0831/taoli`; local remote `origin`
+  points to `https://github.com/tonyls0831/taoli.git`.
 - Creating or modifying GitHub issues, PRs, labels, or remotes is an external
   write and requires an explicit user request.
 
@@ -103,8 +104,9 @@ project context; the tracked files above are the durable source.
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues using the `gh` CLI. See
-`docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked in GitHub Issues. In Codex, prefer the connected
+GitHub app and use the `gh` CLI when an operation is not exposed by the app.
+See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
