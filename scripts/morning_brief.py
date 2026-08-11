@@ -166,9 +166,10 @@ def main():
                   "|---|---|---|---|---|---|---|"]
         for e in divs:
             flag = "⭐觀察" if e["pct"] >= 10 else ""
+            ref_text = f"{e['ref']:.2f}" if e["ref"] else "-"
             lines.append(f"| {e['code']} | {e['name']} | {e['cash']:.2f} | "
                          f"{e['prev'] or '-'} | "
-                         f"{f'{e['ref']:.2f}' if e['ref'] else '-'} | "
+                         f"{ref_text} | "
                          f"{e['pct']:.1f}% | {flag} |")
         big = [e for e in divs if e["pct"] >= 10]
         if big:
