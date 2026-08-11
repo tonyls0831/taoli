@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import time
 from datetime import timedelta
+from pathlib import Path
 
 from bs4 import BeautifulSoup
 
@@ -24,18 +25,23 @@ URL = "https://www.dgpa.gov.tw/typh/daily/nds.html"
 TARGETS = ("臺北市", "台北市")   # 判斷基準＝台北市（北北基實務同步）
 
 
-def fetch_status(session) -> dict[str, str]:
-    """回傳 {縣市: 公告文字}。頁面無訊息時回空 dict。"""
-    r = session.get(URL, timeout=10)
-    r.raise_for_status()
-    r.encoding = "utf-8"
-    soup = BeautifulSoup(r.text, "html.parser")
+def parse_status_html(html: str) -> dict[str, str]:
+    """解析 DGPA HTML，回傳 {縣市: 公告文字}。"""
+    soup = BeautifulSoup(html, "html.parser")
     out: dict[str, str] = {}
     for tr in soup.find_all("tr"):
         cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
         if len(cells) >= 2 and cells[0]:
             out[cells[0]] = " ".join(c for c in cells[1:] if c)
     return out
+
+
+def fetch_status(session) -> dict[str, str]:
+    """回傳 {縣市: 公告文字}。頁面無訊息時回空 dict。"""
+    r = session.get(URL, timeout=10)
+    r.raise_for_status()
+    r.encoding = "utf-8"
+    return parse_status_html(r.text)
 
 
 def taipei_alert_text(status: dict[str, str]) -> str | None:
@@ -73,13 +79,29 @@ def main():
     ap.add_argument("--interval", type=float, default=30, help="輪詢間隔（秒）")
     ap.add_argument("--fast", action="store_true", help="2 秒輪詢（颱風夜用）")
     ap.add_argument("--once", action="store_true", help="抓一次就結束（測試）")
+    ap.add_argument(
+        "--source-file",
+        type=Path,
+        help="搭配 --once 讀取本機 DGPA HTML，供離線重播驗證",
+    )
     args = ap.parse_args()
+    if args.source_file and not args.once:
+        ap.error("--source-file 必須搭配 --once")
+    if args.source_file and not args.source_file.is_file():
+        ap.error(f"找不到來源檔案: {args.source_file}")
     interval = 2 if args.fast else args.interval
 
-    cfg = load_config()
-    session = make_session(relaxed_ssl_hosts=("www.dgpa.gov.tw",))
+    cfg = {} if args.source_file else load_config()
+    session = (
+        None
+        if args.source_file
+        else make_session(relaxed_ssl_hosts=("www.dgpa.gov.tw",))
+    )
 
-    print(f"[typhoon_watch] 監聽 {URL}")
+    if args.source_file:
+        print(f"[typhoon_watch] 離線來源 {args.source_file}")
+    else:
+        print(f"[typhoon_watch] 監聽 {URL}")
     print(f"[typhoon_watch] 間隔 {interval}s | {settlement_context()}")
 
     fired_hash = None      # 已警報過的公告內容 hash（同一公告不重複轟炸）
@@ -87,7 +109,11 @@ def main():
 
     while True:
         try:
-            status = fetch_status(session)
+            status = (
+                parse_status_html(args.source_file.read_text(encoding="utf-8"))
+                if args.source_file
+                else fetch_status(session)
+            )
             fail_streak = 0
             alert = taipei_alert_text(status)
             stamp = now_taipei().strftime("%H:%M:%S")
@@ -96,7 +122,8 @@ def main():
                 if h != fired_hash:
                     fired_hash = h
                     notify("🌀 颱風假事件警報 — 請人工核對",
-                           build_alert_message(alert), cfg)
+                           build_alert_message(alert), cfg,
+                           sound=not bool(args.source_file))
                 else:
                     print(f"[{stamp}] 臺北市停班公告持續中（已警報過）")
             else:
@@ -107,7 +134,9 @@ def main():
             fail_streak += 1
             print(f"[warn] 抓取失敗 x{fail_streak}: {type(e).__name__}: {e}")
             if fail_streak == 10:
-                notify("typhoon_watch 連續抓取失敗", f"已連續失敗 {fail_streak} 次，請檢查網路/頁面", cfg)
+                notify("typhoon_watch 連續抓取失敗",
+                       f"已連續失敗 {fail_streak} 次，請檢查網路/頁面", cfg,
+                       sound=not bool(args.source_file))
 
         if args.once:
             break
