@@ -2,14 +2,14 @@
 """SOP-1 颱風假停班停課監聽器。
 
 輪詢人事行政總處「天然災害停止上班及上課情形」頁面，
-臺北市出現「停止上班」訊息的瞬間發出警報（蜂鳴＋推播）。
+臺北市出現「停止上班」訊息時發出事件警報（蜂鳴＋推播）。
 
 用法：
   python typhoon_watch.py            # 30 秒輪詢一次（平時掛著）
   python typhoon_watch.py --fast    # 2 秒輪詢一次（週二晚上 19:40 起開這個）
   python typhoon_watch.py --once    # 只抓一次、印出目前狀態（測試用）
 
-搭配 SOP-1：觸發後人工到已開好的下單匣執行雙買掃單。
+搭配 SOP-1：警報後由使用者重新核對正式公告、交易規則與風險；程式不提供下單指示。
 """
 import argparse
 import hashlib
@@ -52,12 +52,20 @@ def settlement_context() -> str:
     tomorrow = now.date() + timedelta(days=1)
     notes = []
     if tomorrow.weekday() == 2:  # 明天週三＝台指週選結算日
-        notes.append("⚡ 明天是週三＝台指週選結算日 → 完全符合 SOP-1 觸發條件（結算順延、時間價值 ×√2）")
+        notes.append("⚡ 明天是週三＝台指週選結算日；若公告影響交易日，請核對交易所最新結算安排")
     elif now.weekday() == 2:
-        notes.append("今天是週三結算日（若上午宣布今日停班＝已休市情境，機會在昨晚）")
+        notes.append("今天是週三結算日；若公告影響交易，請核對交易所最新休市與結算安排")
     else:
-        notes.append(f"明天是{'一二三四五六日'[tomorrow.weekday()]}，非週三結算日 → 時間價值增幅較小，仍有重定價但幅度打折")
+        notes.append(f"明天是{'一二三四五六日'[tomorrow.weekday()]}，非週三結算日；記錄事件並核對適用商品規則")
     return "\n".join(notes)
+
+
+def build_alert_message(alert: str) -> str:
+    return (
+        f"{alert}\n{settlement_context()}\n"
+        "→ 人工核對：確認 DGPA 公告的日期與適用範圍，並查核交易所最新休市及結算安排。\n"
+        "本警報只表示公告條件被偵測到，不代表任何交易或下單指示。"
+    )
 
 
 def main():
@@ -87,10 +95,8 @@ def main():
                 h = hashlib.md5(alert.encode()).hexdigest()
                 if h != fired_hash:
                     fired_hash = h
-                    notify("🌀 颱風假警報 — SOP-1 觸發",
-                           f"{alert}\n{settlement_context()}\n"
-                           f"→ 立即執行：台指週選 價平附近 call+put 市價雙買，漲幅 20% 內掃單，+30~35% 停利",
-                           cfg)
+                    notify("🌀 颱風假事件警報 — 請人工核對",
+                           build_alert_message(alert), cfg)
                 else:
                     print(f"[{stamp}] 臺北市停班公告持續中（已警報過）")
             else:

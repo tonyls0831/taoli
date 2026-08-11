@@ -135,10 +135,10 @@ def main():
             locked_announced = True
             inner_lo = round((int(lo / tick)) * tick, 2)
             inner_hi = round(inner_lo + tick, 2)
-            notify("🔒 SOP-3 結算價區間鎖定",
-                   f"{args.stock} {q0['name']} 結算價已鎖定 ≈ [{lo:.2f}, {hi:.2f}]\n"
-                   f"→ 區間內側參考：低於 {inner_lo} 的買單穩賺、高於 {inner_hi} 的賣單穩賺\n"
-                   f"（有人在區間外側成交＝送錢；絕不掛區間外側單）", cfg)
+            notify("🔒 SOP-3 結算價模型區間縮窄",
+                   f"{args.stock} {q0['name']} 模型估計區間 ≈ [{lo:.2f}, {hi:.2f}]\n"
+                   f"參考跳動刻度：{inner_lo} 至 {inner_hi}。\n"
+                   f"請人工核對樣本完整性、tick 與正式結算規則；本警報不保證結算價，也不代表下單建議。", cfg)
 
         if args.futures_symbol:
             fp = fetch_futures(session, args.futures_symbol)
@@ -150,9 +150,8 @@ def main():
                     notify("↔️ SOP-4 期現價差擴大",
                            f"{args.stock} 現貨 {last_price:.2f} vs 期貨 {fp:.2f} "
                            f"= {basis:+.2f}（{pct:+.2f}%）\n"
-                           f"現貨急{'漲' if basis > 0 else '跌'}、期貨貼均值落後 → "
-                           f"檢視 {'空現貨＋買期貨' if basis > 0 else '買現貨＋空期貨'}，"
-                           f"收斂 <0.5 元雙平", cfg, sound=not locked_announced)
+                           f"價差已達監控門檻。請人工核對資料時間戳、券源、交易成本、流動性與價格延續性。\n"
+                           f"本警報不代表建立、調整或平倉任何部位。", cfg, sound=not locked_announced)
 
         end = now_taipei().replace(hour=13, minute=30, second=10, microsecond=0)
         if (args.max_iter and n_iter >= args.max_iter) or (now_taipei() > end and not args.force) \
