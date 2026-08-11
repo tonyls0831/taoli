@@ -1,0 +1,33 @@
+# Secrets and local runtime configuration
+.env
+.env.*
+!.env.example
+/scripts/config.json
+
+# Claude Code project-local state
+/.claude/
+
+# Large source media kept outside Git
+/videos/
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Generated runtime state (keep Markdown reports)
+/data/*_state.json
+*.log
+
+# Obsidian machine-local state and installed plugin bundles
+/.obsidian/workspace*.json
+/.obsidian/plugins/
+/.trash/
+
+# OS/editor temporary files
+Thumbs.db
+.DS_Store
+*.tmp
+*.temp
