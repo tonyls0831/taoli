@@ -82,6 +82,7 @@ project context; the tracked files above are the durable source.
 - Prefer small, testable changes and retain explicit timeouts, bounded polling,
   and graceful public-data failure handling.
 - For documentation or configuration changes, run:
+  - `python -m unittest discover -s tests -v`
   - `python -m compileall -q scripts`
   - a TOML parse check for `.codex/config.toml`
   - `git diff --check`

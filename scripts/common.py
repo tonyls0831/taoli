@@ -33,6 +33,21 @@ DEFAULT_CONFIG = {
 }
 
 
+def configure_console_encoding() -> None:
+    """Keep Chinese text and symbols printable in Windows CP950 consoles."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
+configure_console_encoding()
+
+
 def load_config() -> dict:
     cfg_path = SCRIPT_DIR / "config.json"
     cfg = dict(DEFAULT_CONFIG)
