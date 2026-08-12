@@ -1,7 +1,11 @@
 import os
+import socketserver
 import subprocess
 import sys
+import tempfile
+import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -12,13 +16,18 @@ NORMAL_FIXTURE = FIXTURE_DIR / "taipei_normal.html"
 SUSPENSION_FIXTURE = FIXTURE_DIR / "taipei_suspension.html"
 MISSING_TAIPEI_FIXTURE = FIXTURE_DIR / "missing_taipei.html"
 CONFIG = ROOT / "scripts" / "config.json"
+DATA_DIR = ROOT / "data"
 
 
 def file_snapshot(path: Path) -> bytes | None:
     return path.read_bytes() if path.exists() else None
 
 
-def run_fixture_cli(fixture: Path = NORMAL_FIXTURE) -> subprocess.CompletedProcess:
+def run_fixture_cli(
+    fixture: Path = NORMAL_FIXTURE,
+    *,
+    env_overrides: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env.update(
         {
@@ -27,6 +36,7 @@ def run_fixture_cli(fixture: Path = NORMAL_FIXTURE) -> subprocess.CompletedProce
             "NO_PROXY": "",
         }
     )
+    env.update(env_overrides or {})
 
     return subprocess.run(
         [
@@ -43,6 +53,26 @@ def run_fixture_cli(fixture: Path = NORMAL_FIXTURE) -> subprocess.CompletedProce
         timeout=10,
         check=False,
     )
+
+
+class RecordingProxyHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        self.server.connection_count += 1
+        self.request.recv(1024)
+        self.request.sendall(b"HTTP/1.1 502 Offline Replay\r\nContent-Length: 0\r\n\r\n")
+
+
+@contextmanager
+def recording_proxy():
+    with socketserver.TCPServer(("127.0.0.1", 0), RecordingProxyHandler) as server:
+        server.connection_count = 0
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield server
+        finally:
+            server.shutdown()
+            thread.join()
 
 
 class TyphoonFixtureCliTest(unittest.TestCase):
@@ -112,19 +142,58 @@ class TyphoonFixtureCliTest(unittest.TestCase):
 
 
 class TyphoonFixtureSafetyTest(unittest.TestCase):
-    def test_fixture_replay_preserves_local_config(self):
+    def test_all_fixture_replays_avoid_external_and_filesystem_side_effects(self):
         config_before = file_snapshot(CONFIG)
+        runtime_state_before = {
+            path: path.read_bytes() for path in DATA_DIR.glob("*_state.json")
+        }
 
-        result = run_fixture_cli()
-        stderr = result.stderr.decode("utf-8", errors="replace")
+        with tempfile.TemporaryDirectory() as sentinel_dir, recording_proxy() as proxy:
+            sentinel_path = Path(sentinel_dir)
+            (sentinel_path / "winsound.py").write_text(
+                "from pathlib import Path\n"
+                "def Beep(frequency, duration):\n"
+                "    Path(__file__).with_name('beep_called').touch()\n",
+                encoding="utf-8",
+            )
+            proxy_url = f"http://127.0.0.1:{proxy.server_address[1]}"
+            env_overrides = {
+                "HTTP_PROXY": proxy_url,
+                "HTTPS_PROXY": proxy_url,
+                "PYTHONPATH": os.pathsep.join(
+                    filter(None, (str(sentinel_path), os.environ.get("PYTHONPATH")))
+                ),
+            }
+            results = [
+                run_fixture_cli(fixture, env_overrides=env_overrides)
+                for fixture in (
+                    NORMAL_FIXTURE,
+                    SUSPENSION_FIXTURE,
+                    MISSING_TAIPEI_FIXTURE,
+                )
+            ]
+            beep_called = (sentinel_path / "beep_called").exists()
+
+        runtime_state_after = {
+            path: path.read_bytes() for path in DATA_DIR.glob("*_state.json")
+        }
+        stderr = b"\n".join(result.stderr for result in results).decode(
+            "utf-8", errors="replace"
+        )
 
         observed = {
-            "returncode": result.returncode,
+            "returncodes": [result.returncode for result in results],
+            "network_connections": proxy.connection_count,
+            "beep_called": beep_called,
             "config_unchanged": file_snapshot(CONFIG) == config_before,
+            "runtime_state_unchanged": runtime_state_after == runtime_state_before,
         }
         expected = {
-            "returncode": 0,
+            "returncodes": [0, 0, 0],
+            "network_connections": 0,
+            "beep_called": False,
             "config_unchanged": True,
+            "runtime_state_unchanged": True,
         }
 
         self.assertEqual(observed, expected, stderr)
