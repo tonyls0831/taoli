@@ -26,9 +26,16 @@
 輪詢人事行政總處「天然災害停止上班及上課情形」官方頁（比刷市長 FB 快且穩），
 臺北市出現「停止上班」且非「照常」→ 蜂鳴＋推播，並標注明天是否為週三結算日。
 - `--fast` = 2 秒輪詢（颱風夜專用）；`--once` = 測試單抓
+- `--once --source-file <fixture.html>` = 離線重播 DGPA HTML；不連網、不建立設定檔、不發通知或蜂鳴，適合 parser regression test
 - 同一則公告只警報一次，不會轟炸
 - ⚠️ 警報後先人工核對 DGPA 公告日期、適用範圍，以及交易所最新休市與結算安排；警報本身不是交易指示
 - ⚠️ 停班公告的表格版面若改版，解析可能失效——每年颱風季前先 `--once` 測一次
+
+離線重播範例：
+
+```powershell
+python typhoon_watch.py --once --source-file ..\tests\fixtures\dgpa\taipei_normal.html
+```
 
 ### dividend_spread.py（SOP-2）
 1. 抓 TWSE 除權息預告（只計現金股利；除權不蒸發指數）

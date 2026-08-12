@@ -13,6 +13,10 @@ Taoli 是一個以 Obsidian 為載體的交易策略研究 vault。現有材料�
 - Phase 0 已建立 Git baseline：`45bcb6e55f3184257ad92b7db65f0d9efbe27146`。
 - Phase 1 已執行 Claude Code chat import；Claude 的本機原始 JSONL 與 memory 仍保留於 `%USERPROFILE%\.claude\projects\D--obsidian-vaults-taoli`，但它們不再是執行期依賴。
 - Phase 2 將 Codex 設為主要 agent，專案預設模型為 `gpt-5.6-sol`，推理強度為 `xhigh`。
+- Phase 3B 修正 Windows CP950 console 的 UTF-8 輸出相容性：`c2fa722333e7737a01e0330487f8445826d9cc1d`。
+- Phase 3C 將監控警報與交易決策語言分離：`d4899ee978e56f1d709b32d9d5f9b87f6e5618f1`。
+- Phase 4 建立 private GitHub repository `tonyls0831/taoli`、`origin/main` 與 GitHub Issues triage labels；repository 文件提交為 `9f629c6296200cca42df649578d826decb45fd52`。
+- Phase 5 以 GitHub Issue #1 驗證 Codex-native Issue → TDD → branch → CI → draft PR 流程；第一個 public seam 是 `typhoon_watch.py --once --source-file <fixture.html>`。
 - Claude 的寬鬆 shell allowlist、一次性暫存路徑與舊 whisper.cpp scratchpad 沒有遷入 Codex。
 
 ## 已保存的研究材料
@@ -65,6 +69,7 @@ Claude-era 紀錄顯示四支工具曾於 2026-07-17 對真實資料執行；這
 ## 後續工作邊界
 
 - 建立自動化測試與可重播 fixtures，降低對即時端點的驗證依賴。
+- GitHub Actions 會在 `main` push 與 pull request 上以 Python 3.10／3.14 執行離線測試與 compile，並以 Python 3.14 parse Codex TOML。
 - 每年颱風季與除權息季前重新驗證資料解析器。
 - 若未來評估券商 API 或自動下單，應視為獨立、高風險專案決策，不是現有腳本的自然延伸。
 - Private GitHub repository 與 issue tracker 位於 `tonyls0831/taoli`，本機以 `origin` 連接；相關規範見 `docs/agents/issue-tracker.md`。
