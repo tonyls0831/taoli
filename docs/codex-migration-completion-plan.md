@@ -1,6 +1,6 @@
 # Codex 遷移完成計畫
 
-狀態：已由 repository owner 於 2026-08-12 確認
+狀態：已由 repository owner 於 2026-08-12 確認；由 GitHub Issue #3 追蹤
 版本日期：2026-08-12
 
 ## 目的
@@ -187,26 +187,26 @@ fixture 清楚分離。
 以下為本 spec 核准後的 ticket batch。票號由 GitHub 建立時決定；`blocked by` 應
 使用 native dependency，無法使用時才回退到 issue body。
 
-| 暫定 ID | Ticket | 建議角色 | Blocking |
-|---|---|---|---|
-| M0 | Track Codex migration completion | tracking | — |
-| P6-1 | Add typhoon alert and missing-data replay cases | `ready-for-agent` | — |
-| P6-2 | Decide `dividend_spread.py` replay seam | `ready-for-human` | — |
-| P6-3 | Implement dividend-spread replay slice | `ready-for-agent` | P6-2 |
-| P6-4 | Decide `settlement_monitor.py` replay seam | `ready-for-human` | — |
-| P6-5 | Implement settlement replay slice | `ready-for-agent` | P6-4 |
-| P6-6 | Decide `morning_brief.py` replay seam | `ready-for-human` | — |
-| P6-7 | Implement morning-brief replay slice | `ready-for-agent` | P6-6 |
-| P7-1 | Approve main branch-protection policy | `ready-for-human` | Phase 6 |
-| P7-2 | Apply repository governance and templates | `ready-for-agent` | P7-1 |
-| P7-3 | Audit secrets, ignore rules, and clean-clone reproducibility | `ready-for-agent` | Phase 6 |
-| P8-1 | Authorize bounded live-source recertification | `ready-for-human` | Phase 6 |
-| P8-2 | Recertify `typhoon_watch.py` sources | `ready-for-agent` | P8-1 |
-| P8-3 | Recertify `dividend_spread.py` sources | `ready-for-agent` | P8-1, P6-3 |
-| P8-4 | Recertify `settlement_monitor.py` sources | `ready-for-agent` | P8-1, P6-5 |
-| P8-5 | Recertify `morning_brief.py` sources | `ready-for-agent` | P8-1, P6-7 |
-| P9-1 | Run repository-only cold-start acceptance | `ready-for-agent` | Phase 7, Phase 8 |
-| P9-2 | Declare Codex migration complete | `ready-for-agent` | P9-1 |
+| 暫定 ID | GitHub Issue | Ticket | 建議角色 | Blocking |
+|---|---|---|---|---|
+| M0 | #3 | Track Codex migration completion | tracking | — |
+| P6-1 | #4 | Add typhoon alert and missing-data replay cases | `ready-for-agent` | — |
+| P6-2 | #5 | Decide `dividend_spread.py` replay seam | `ready-for-human` | — |
+| P6-3 | #6 | Implement dividend-spread replay slice | `ready-for-agent` | P6-2 |
+| P6-4 | #7 | Decide `settlement_monitor.py` replay seam | `ready-for-human` | — |
+| P6-5 | #8 | Implement settlement replay slice | `ready-for-agent` | P6-4 |
+| P6-6 | #9 | Decide `morning_brief.py` replay seam | `ready-for-human` | — |
+| P6-7 | #10 | Implement morning-brief replay slice | `ready-for-agent` | P6-6 |
+| P7-1 | #11 | Approve main branch-protection policy | `ready-for-human` | Phase 6 |
+| P7-2 | #12 | Apply repository governance and templates | `ready-for-agent` | P7-1 |
+| P7-3 | #13 | Audit secrets, ignore rules, and clean-clone reproducibility | `ready-for-agent` | Phase 6 |
+| P8-1 | #14 | Authorize bounded live-source recertification | `ready-for-human` | Phase 6 |
+| P8-2 | #15 | Recertify `typhoon_watch.py` sources | `ready-for-agent` | P8-1 |
+| P8-3 | #16 | Recertify `dividend_spread.py` sources | `ready-for-agent` | P8-1, P6-3 |
+| P8-4 | #17 | Recertify `settlement_monitor.py` sources | `ready-for-agent` | P8-1, P6-5 |
+| P8-5 | #18 | Recertify `morning_brief.py` sources | `ready-for-agent` | P8-1, P6-7 |
+| P9-1 | #19 | Run repository-only cold-start acceptance | `ready-for-agent` | Phase 7, Phase 8 |
+| P9-2 | #20 | Declare Codex migration complete | `ready-for-agent` | P9-1 |
 
 `ready-for-human` tickets代表需要 owner 作決定或授權；決定完成後，受其阻擋的
 implementation ticket 才進入 agent 工作佇列。由本計畫直接產生的 implementation
