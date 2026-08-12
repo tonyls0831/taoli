@@ -15,33 +15,36 @@ def file_snapshot(path: Path) -> bytes | None:
     return path.read_bytes() if path.exists() else None
 
 
-class TyphoonFixtureCliTest(unittest.TestCase):
-    def test_once_replays_normal_status_without_network_notifications_or_state(self):
-        config_before = file_snapshot(CONFIG)
-        env = os.environ.copy()
-        env.update(
-            {
-                "HTTP_PROXY": "http://127.0.0.1:9",
-                "HTTPS_PROXY": "http://127.0.0.1:9",
-                "NO_PROXY": "",
-            }
-        )
+def run_fixture_cli() -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env.update(
+        {
+            "HTTP_PROXY": "http://127.0.0.1:9",
+            "HTTPS_PROXY": "http://127.0.0.1:9",
+            "NO_PROXY": "",
+        }
+    )
 
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(SCRIPT),
-                "--once",
-                "--source-file",
-                str(FIXTURE),
-            ],
-            cwd=ROOT,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=10,
-            check=False,
-        )
+    return subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--once",
+            "--source-file",
+            str(FIXTURE),
+        ],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=10,
+        check=False,
+    )
+
+
+class TyphoonFixtureCliTest(unittest.TestCase):
+    def test_once_replays_normal_status_without_network_notifications(self):
+        result = run_fixture_cli()
         stdout = result.stdout.decode("utf-8", errors="replace")
         stderr = result.stderr.decode("utf-8", errors="replace")
 
@@ -52,13 +55,30 @@ class TyphoonFixtureCliTest(unittest.TestCase):
                 "無停班訊息 | 臺北市: 今日照常上班、照常上課" in stdout
             ),
             "alert_suppressed": "事件警報" not in stdout,
-            "config_unchanged": file_snapshot(CONFIG) == config_before,
         }
         expected = {
             "returncode": 0,
             "offline_source_reported": True,
             "normal_status_reported": True,
             "alert_suppressed": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
+
+class TyphoonFixtureSafetyTest(unittest.TestCase):
+    def test_fixture_replay_preserves_local_config(self):
+        config_before = file_snapshot(CONFIG)
+
+        result = run_fixture_cli()
+        stderr = result.stderr.decode("utf-8", errors="replace")
+
+        observed = {
+            "returncode": result.returncode,
+            "config_unchanged": file_snapshot(CONFIG) == config_before,
+        }
+        expected = {
+            "returncode": 0,
             "config_unchanged": True,
         }
 
