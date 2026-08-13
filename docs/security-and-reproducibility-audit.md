@@ -1,7 +1,9 @@
 # Security and reproducibility audit
 
-稽核日期：2026-08-13（Asia/Taipei）  
-追蹤 Issue：#13  
+稽核日期：2026-08-13（Asia/Taipei）
+
+追蹤 Issue：#13
+
 基準 commit：`d11a20930c7b917ecb026d73625a579767d25a0c`
 
 本文件只記錄稽核範圍、位置類型與結果，不保存或顯示 secret 值。
@@ -48,8 +50,13 @@ clean Windows Python 上，這會隱含依賴本機額外安裝的 `tzdata`。
 
 ## Clean-clone validation
 
-待本修正分支推送後，從 remote branch 建立全新 temporary clone 與全新 venv，依 tracked
-文件執行：
+從 remote `agent/reproducibility-audit` 的 commit
+`c778ba66c3c986d49637ac80579d938c25106eae` 建立全新 Windows temporary clone 與全新
+venv；temporary root 的 leaf name 是
+`taoli-clean-clone-b950e31141264b379e765bfb73e8d356`，驗證後移除。環境為 Python
+3.14.4、pip 26.0.1，未沿用本 repository 的 venv 或 site-packages。
+
+依 tracked 文件執行：
 
 1. `python -m pip install --disable-pip-version-check -r requirements.txt`
 2. `python -m unittest discover -s tests -v`
@@ -57,5 +64,13 @@ clean Windows Python 上，這會隱含依賴本機額外安裝的 `tzdata`。
 4. 以 `tomllib` parse `.codex/config.toml`
 5. `git diff --check`
 
-最終 clone 路徑、Python／pip 版本、逐項結果與 clean worktree 證據會在 remote branch
-驗證完成後補入，不將 temporary path 納入 repository。
+結果：
+
+- requirements 安裝成功，實際取得 `requests 2.34.2`、`beautifulsoup4 4.15.0`、
+  `tzdata 2026.3` 與其 dependencies；
+- 31 個 tests 通過，僅 1 個明確標註為 CI Python 3.10 matrix 才執行的 local skip；
+- compile、TOML parse、`git diff --check` 全部通過；
+- 忽略 `.clean-venv/` 後，tracked worktree 為 clean。
+
+結論：tracked files 足以在新的 Windows Python 3.14 環境完成安裝與完整離線驗證；
+原先的 timezone hidden dependency 已修復。Python 3.10 由 PR CI matrix 另行驗證。
