@@ -1,0 +1,60 @@
+name: Engineering task
+description: Propose a scoped repository change for triage before implementation.
+title: "[Task] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        GitHub Issues are this repository's request surface. Describe the need here before opening an implementation PR.
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objective
+      description: What repository outcome is needed, and why?
+      placeholder: Describe one observable outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: spec
+    attributes:
+      label: Specification and evidence
+      description: Link the durable spec, official source, transcript evidence, or worked example.
+      placeholder: Include acceptance criteria and distinguish source claims from project analysis.
+    validations:
+      required: true
+  - type: textarea
+    id: seam
+    attributes:
+      label: Public seam
+      description: Name the user-facing CLI or document interface to change, or explain why no seam is involved.
+      placeholder: "Example: python scripts/tool.py --replay CASE_DIR"
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: State the deterministic tests, supported Python versions, and safe checks required.
+      placeholder: Include the smallest representative happy path and clear failure behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and non-goals
+      description: Identify network, notification, schedule, runtime-state, secret, brokerage, and trading boundaries.
+      placeholder: State what this task must not do.
+    validations:
+      required: true
+  - type: dropdown
+    id: external_writes
+    attributes:
+      label: External writes
+      description: Will this task modify GitHub settings, Issues, PRs, remotes, schedules, notifications, or another external system?
+      options:
+        - No external writes
+        - Explicit owner authorization required
+        - Explicit owner authorization already linked above
+    validations:
+      required: true
