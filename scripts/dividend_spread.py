@@ -14,15 +14,189 @@
 6. 輸出 markdown 報告到 vault 的 data/ 資料夾。
 
 限制：只算「已公告」的除權息；馬克羊的完整版還會自己猜未公告的大權值股。
+
+離線重播：
+  python dividend_spread.py --replay <case-dir>
+  從 scenario.json 與原始 provider payload 重算，只輸出 console，不產生外部副作用。
 """
+import argparse
 import json
 import re
+import sys
 from datetime import date
+from pathlib import Path
 
 from common import (DATA_DIR, load_config, make_session, notify, now_taipei,
                     roc_to_date, settlement_dates_from, contract_code)
 
 STATE_FILE = DATA_DIR / "dividend_spread_state.json"
+
+COMPANY_SHARES_URL = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"
+CLOSING_PRICES_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+INDEX_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
+DIVIDEND_EVENTS_URL = "https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL"
+TAIFEX_URL = "https://www.taifex.com.tw/cht/3/futDataDown"
+
+REQUIRED_REPLAY_SOURCES = (
+    "twse_company_shares",
+    "twse_closing_prices",
+    "twse_index",
+    "twse_dividend_events",
+)
+
+
+class ReplayScenarioError(Exception):
+    """離線重播 manifest 不符合公開 scenario contract。"""
+
+
+class ReplaySourceError(Exception):
+    """離線重播來源缺少或無法解碼。"""
+
+
+class ReplayResponse:
+    def __init__(self, path: Path, source_name: str):
+        self.path = path
+        self.source_name = source_name
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        try:
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as e:
+            raise ReplaySourceError(
+                f"{self.source_name}: JSON 來源無效 ({type(e).__name__})"
+            ) from e
+
+    @property
+    def content(self) -> bytes:
+        try:
+            return self.path.read_bytes()
+        except OSError as e:
+            raise ReplaySourceError(
+                f"{self.source_name}: 來源檔案無法讀取 ({type(e).__name__})"
+            ) from e
+
+
+class ReplaySession:
+    """以 scenario 內的原始 payload 取代外部 TWSE／TAIFEX HTTP 邊界。"""
+
+    GET_SOURCES = {
+        COMPANY_SHARES_URL: "twse_company_shares",
+        CLOSING_PRICES_URL: "twse_closing_prices",
+        INDEX_URL: "twse_index",
+        DIVIDEND_EVENTS_URL: "twse_dividend_events",
+    }
+
+    def __init__(self, source_paths: dict[str, Path]):
+        self.source_paths = source_paths
+
+    def _response(self, source_name: str) -> ReplayResponse:
+        path = self.source_paths.get(source_name)
+        if path is None:
+            raise ReplaySourceError(f"{source_name}: scenario 未提供來源")
+        if not path.is_file():
+            raise ReplaySourceError(f"{source_name}: 找不到來源檔案 {path.name}")
+        return ReplayResponse(path, source_name)
+
+    def get(self, url, **_kwargs):
+        source_name = self.GET_SOURCES.get(url)
+        if source_name is None:
+            raise ReplaySourceError(f"未支援的 replay GET 來源: {url}")
+        return self._response(source_name)
+
+    def post(self, url, **_kwargs):
+        if url != TAIFEX_URL:
+            raise ReplaySourceError(f"未支援的 replay POST 來源: {url}")
+        return self._response("taifex_futures")
+
+
+def replay_source_path(case_dir: Path, source_name: str, relative_path) -> Path:
+    if not isinstance(relative_path, str) or not relative_path:
+        raise ReplayScenarioError(f"{source_name}: 來源路徑必須是非空字串")
+    path = Path(relative_path)
+    if path.is_absolute():
+        raise ReplayScenarioError(f"{source_name}: 來源路徑必須相對於 case directory")
+    resolved_case = case_dir.resolve()
+    resolved_path = (case_dir / path).resolve()
+    try:
+        resolved_path.relative_to(resolved_case)
+    except ValueError as e:
+        raise ReplayScenarioError(f"{source_name}: 來源路徑不可離開 case directory") from e
+    return resolved_path
+
+
+def load_replay_case(case_dir: Path) -> dict:
+    if not case_dir.is_dir():
+        raise ReplayScenarioError(f"找不到 case directory: {case_dir}")
+    scenario_path = case_dir / "scenario.json"
+    try:
+        scenario = json.loads(scenario_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as e:
+        raise ReplayScenarioError("找不到 scenario.json") from e
+    except (UnicodeError, json.JSONDecodeError) as e:
+        raise ReplayScenarioError(
+            f"scenario.json 無效 ({type(e).__name__})"
+        ) from e
+
+    if not isinstance(scenario, dict):
+        raise ReplayScenarioError("scenario.json 頂層必須是物件")
+    if scenario.get("schema_version") != 1:
+        raise ReplayScenarioError("schema_version 必須是 1")
+    try:
+        as_of_date = date.fromisoformat(scenario["as_of_date"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise ReplayScenarioError("as_of_date 必須是 YYYY-MM-DD") from e
+
+    model = scenario.get("model")
+    if not isinstance(model, dict):
+        raise ReplayScenarioError("model 必須是物件")
+    config = {}
+    for key in (
+        "hedge_discount_points",
+        "spread_jump_alert",
+        "spread_gap_alert",
+    ):
+        try:
+            config[key] = float(model[key])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ReplayScenarioError(f"model.{key} 必須是數字") from e
+
+    previous_state = scenario.get("previous_state", {})
+    if not isinstance(previous_state, dict):
+        raise ReplayScenarioError("previous_state 必須是物件")
+    if "fair" in previous_state and (
+        isinstance(previous_state["fair"], bool)
+        or not isinstance(previous_state["fair"], (int, float))
+    ):
+        raise ReplayScenarioError("previous_state.fair 必須是數字")
+    for key in ("date", "near"):
+        if key in previous_state and not isinstance(previous_state[key], str):
+            raise ReplayScenarioError(f"previous_state.{key} 必須是字串")
+
+    sources = scenario.get("sources")
+    if not isinstance(sources, dict):
+        raise ReplayScenarioError("sources 必須是物件")
+    source_paths = {
+        source_name: replay_source_path(case_dir, source_name, relative_path)
+        for source_name, relative_path in sources.items()
+    }
+    for source_name in REQUIRED_REPLAY_SOURCES:
+        path = source_paths.get(source_name)
+        if path is None:
+            raise ReplayScenarioError(f"sources.{source_name} 為必要來源")
+        if not path.is_file():
+            raise ReplaySourceError(
+                f"{source_name}: 找不到來源檔案 {path.name}"
+            )
+
+    return {
+        "today": as_of_date,
+        "config": config,
+        "previous_state": previous_state,
+        "session": ReplaySession(source_paths),
+    }
 
 
 def fetch_json(session, url):
@@ -31,34 +205,92 @@ def fetch_json(session, url):
     return r.json()
 
 
-def get_market_cap_per_point(session) -> tuple[float, float, dict[str, float]]:
+def provider_text(
+    row: dict,
+    key: str,
+    source_name: str,
+    *,
+    strict_source: bool,
+    default: str = "",
+) -> str:
+    value = row.get(key)
+    if not value:
+        return default
+    if strict_source and not isinstance(value, str):
+        raise RuntimeError(f"{source_name}: {key} 必須是字串")
+    return value
+
+
+def get_market_cap_per_point(
+    session, *, strict_sources: bool = False
+) -> tuple[float, float, dict[str, float]]:
     """回傳 (每點市值(元), 指數值, {股票代號: 發行股數})。"""
-    comp = fetch_json(session, "https://openapi.twse.com.tw/v1/opendata/t187ap03_L")
+    comp = fetch_json(session, COMPANY_SHARES_URL)
+    if strict_sources and not isinstance(comp, list):
+        raise RuntimeError("twse_company_shares: payload 必須是陣列")
     shares: dict[str, float] = {}
     for row in comp:
-        code = (row.get("公司代號") or "").strip()
-        n = (row.get("已發行普通股數或TDR原股發行股數") or "0").replace(",", "")
+        if strict_sources and not isinstance(row, dict):
+            raise RuntimeError("twse_company_shares: 公司股數列必須是物件")
+        code = provider_text(
+            row,
+            "公司代號",
+            "twse_company_shares",
+            strict_source=strict_sources,
+        ).strip()
+        n = provider_text(
+            row,
+            "已發行普通股數或TDR原股發行股數",
+            "twse_company_shares",
+            strict_source=strict_sources,
+            default="0",
+        ).replace(",", "")
         try:
             shares[code] = float(n)
         except ValueError:
             pass
+    if strict_sources and not shares:
+        raise RuntimeError("twse_company_shares: 沒有有效公司股數資料")
 
-    quotes = fetch_json(session, "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
+    quotes = fetch_json(session, CLOSING_PRICES_URL)
+    if strict_sources and not isinstance(quotes, list):
+        raise RuntimeError("twse_closing_prices: payload 必須是陣列")
     closes: dict[str, float] = {}
     for row in quotes:
-        code = (row.get("Code") or "").strip()
-        c = (row.get("ClosingPrice") or "").replace(",", "")
+        if strict_sources and not isinstance(row, dict):
+            raise RuntimeError("twse_closing_prices: 收盤價列必須是物件")
+        code = provider_text(
+            row,
+            "Code",
+            "twse_closing_prices",
+            strict_source=strict_sources,
+        ).strip()
+        c = provider_text(
+            row,
+            "ClosingPrice",
+            "twse_closing_prices",
+            strict_source=strict_sources,
+        ).replace(",", "")
         try:
             closes[code] = float(c)
         except ValueError:
             pass
 
     total_cap = sum(closes[c] * s for c, s in shares.items() if c in closes)
+    if strict_sources and (not closes or total_cap <= 0):
+        raise RuntimeError("twse_closing_prices: 沒有有效收盤價資料")
 
     # 加權指數即時值（收盤後為最後值）
-    r = session.get("https://mis.twse.com.tw/stock/api/getStockInfo.jsp",
+    r = session.get(INDEX_URL,
                     params={"ex_ch": "tse_t00.tw", "json": "1", "delay": "0"}, timeout=10)
-    arr = r.json().get("msgArray", [])
+    index_payload = r.json()
+    if strict_sources and not isinstance(index_payload, dict):
+        raise RuntimeError("twse_index: payload 必須是物件")
+    arr = index_payload.get("msgArray", [])
+    if strict_sources and (
+        not isinstance(arr, list) or (arr and not isinstance(arr[0], dict))
+    ):
+        raise RuntimeError("twse_index: msgArray 必須是物件陣列")
     idx = None
     for f in ("z", "y", "pz"):
         v = (arr[0].get(f) if arr else "") or ""
@@ -68,37 +300,64 @@ def get_market_cap_per_point(session) -> tuple[float, float, dict[str, float]]:
         except ValueError:
             continue
     if not idx:
-        raise RuntimeError("抓不到加權指數值")
+        message = "twse_index: 沒有有效加權指數資料" if strict_sources else "抓不到加權指數值"
+        raise RuntimeError(message)
     return total_cap / idx, idx, shares
 
 
-def get_dividend_events(session, shares: dict[str, float],
-                        cap_per_point: float) -> list[dict]:
+def get_dividend_events(session, shares: dict[str, float], cap_per_point: float,
+                        *, strict_sources: bool = False) -> list[dict]:
     """已公告的除息事件 → [{date, code, name, cash, points}]，按日期排序。"""
-    rows = fetch_json(session, "https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL")
+    rows = fetch_json(session, DIVIDEND_EVENTS_URL)
+    if strict_sources and not isinstance(rows, list):
+        raise RuntimeError("twse_dividend_events: payload 必須是陣列")
     events = []
     for row in rows:
-        d = roc_to_date(row.get("Date", ""))
-        code = (row.get("Code") or "").strip()
+        if strict_sources and not isinstance(row, dict):
+            raise RuntimeError("twse_dividend_events: 除息事件列必須是物件")
+        d = roc_to_date(provider_text(
+            row,
+            "Date",
+            "twse_dividend_events",
+            strict_source=strict_sources,
+        ))
+        code = provider_text(
+            row,
+            "Code",
+            "twse_dividend_events",
+            strict_source=strict_sources,
+        ).strip()
         try:
-            cash = float((row.get("CashDividend") or "0").replace(",", "") or 0)
+            cash = float(provider_text(
+                row,
+                "CashDividend",
+                "twse_dividend_events",
+                strict_source=strict_sources,
+                default="0",
+            ).replace(",", "") or 0)
         except ValueError:
             cash = 0.0
         if not d or cash <= 0 or code not in shares:
             continue
         pts = cash * shares[code] / cap_per_point
         events.append({"date": d.isoformat(), "code": code,
-                       "name": (row.get("Name") or "").strip(),
+                       "name": provider_text(
+                           row,
+                           "Name",
+                           "twse_dividend_events",
+                           strict_source=strict_sources,
+                       ).strip(),
                        "cash": cash, "points": round(pts, 2)})
     events.sort(key=lambda e: e["date"])
     return events
 
 
-def get_market_spread(session, near_code: str, next_code: str):
+def get_market_spread(session, near_code: str, next_code: str,
+                      as_of_date: date | None = None, *,
+                      strict_source: bool = False):
     """TAIFEX 盤後：TX 近月/次月（一般時段）收盤價 → (近月價, 次月價, 價差, 日期)。"""
-    today = now_taipei().date()
-    start = today.replace(day=1) if today.day > 7 else (today.replace(day=1))
-    r = session.post("https://www.taifex.com.tw/cht/3/futDataDown",
+    today = as_of_date or now_taipei().date()
+    r = session.post(TAIFEX_URL,
                      data={"down_type": "1", "commodity_id": "TX",
                            "queryStartDate": (today.replace(day=1)).strftime("%Y/%m/%d"),
                            "queryEndDate": today.strftime("%Y/%m/%d")},
@@ -124,20 +383,44 @@ def get_market_spread(session, near_code: str, next_code: str):
     if near_code in best and next_code in best:
         near_p, next_p = best[near_code][1], best[next_code][1]
         return near_p, next_p, next_p - near_p, best[near_code][0]
+    if strict_source:
+        raise RuntimeError("taifex_futures: 沒有近月／次月有效一般時段資料")
     return None
 
 
-def main():
-    cfg = load_config()
-    session = make_session()
-    today = now_taipei().date()
+def print_replay_alert(title: str, message: str):
+    print(f"\n{'=' * 60}\n** {title} **\n{message}\n{'=' * 60}")
+
+
+def emit_alert(title: str, message: str, cfg: dict, *, replay_mode: bool):
+    if replay_mode:
+        print_replay_alert(title, message)
+    else:
+        notify(title, message, cfg)
+
+
+def run(replay_dir: Path | None = None) -> int:
+    replay = load_replay_case(replay_dir) if replay_dir else None
+    if replay:
+        cfg = replay["config"]
+        session = replay["session"]
+        today = replay["today"]
+        print(f"[dividend_spread] 離線重播 {today}")
+    else:
+        cfg = load_config()
+        session = make_session()
+        today = now_taipei().date()
 
     print("[1/4] 計算每點市值 …")
-    cap_per_point, idx, shares = get_market_cap_per_point(session)
+    cap_per_point, idx, shares = get_market_cap_per_point(
+        session, strict_sources=bool(replay)
+    )
     print(f"      加權指數 {idx:,.0f}｜全市場市值 {cap_per_point * idx / 1e12:,.1f} 兆｜每點 ≈ {cap_per_point / 1e8:,.1f} 億")
 
     print("[2/4] 抓除權息預告、算蒸發點數 …")
-    events = get_dividend_events(session, shares, cap_per_point)
+    events = get_dividend_events(
+        session, shares, cap_per_point, strict_sources=bool(replay)
+    )
 
     settles = settlement_dates_from(today, 3)
     near_s, next_s = settles[0], settles[1]
@@ -150,23 +433,26 @@ def main():
     near_code, next_code = contract_code(near_s), contract_code(next_s)
     mkt = None
     try:
-        mkt = get_market_spread(session, near_code, next_code)
+        mkt = get_market_spread(
+            session, near_code, next_code, today, strict_source=bool(replay)
+        )
     except Exception as e:
         print(f"[warn] TAIFEX 價差抓取失敗: {e}")
 
     # ---- 與上次比較（跨界跳動警報）----
-    prev = {}
-    if STATE_FILE.exists():
+    prev = replay["previous_state"] if replay else {}
+    if not replay and STATE_FILE.exists():
         try:
             prev = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except Exception:
             prev = {}
     prev_fair = prev.get("fair")
     jump = (fair - prev_fair) if (prev_fair is not None and prev.get("near") == near_code) else None
-    STATE_FILE.write_text(json.dumps(
-        {"date": today.isoformat(), "near": near_code, "next": next_code,
-         "d_near": round(d_near, 1), "d_cross": round(d_cross, 1), "fair": round(fair, 1)},
-        ensure_ascii=False, indent=2), encoding="utf-8")
+    if not replay:
+        STATE_FILE.write_text(json.dumps(
+            {"date": today.isoformat(), "near": near_code, "next": next_code,
+             "d_near": round(d_near, 1), "d_cross": round(d_cross, 1), "fair": round(fair, 1)},
+            ensure_ascii=False, indent=2), encoding="utf-8")
 
     # ---- 報告 ----
     lines = [
@@ -200,24 +486,59 @@ def main():
         lines.append(f"| {e['date']} | {e['code']} | {e['name']} | {e['cash']:.2f} | {e['points']:.2f} | {bucket} |")
 
     report = "\n".join(lines) + "\n"
-    out = DATA_DIR / f"除權息價差_{today.isoformat()}.md"
-    out.write_text(report, encoding="utf-8")
-    print(f"[4/4] 報告已寫入 {out}")
+    if replay:
+        print("[4/4] 離線重播：未寫入報告或狀態")
+    else:
+        out = DATA_DIR / f"除權息價差_{today.isoformat()}.md"
+        out.write_text(report, encoding="utf-8")
+        print(f"[4/4] 報告已寫入 {out}")
     print("\n" + "\n".join(lines[:12]))
 
     # ---- 警報 ----
     if jump is not None and abs(jump) >= float(cfg.get("spread_jump_alert", 10)):
-        notify("📊 SOP-2 合理價差跳動",
-               f"合理價差 {prev_fair:+.1f} → {fair:+.1f}（{jump:+.1f} 點）\n"
-               f"通常＝某大權值股除息日估計跨過結算日邊界。\n"
-               f"請人工核對除息資料、估計日期、市場價差、流動性與風險條件。\n"
-               f"本警報不代表任何部位條件已成立。", cfg)
+        title = "📊 SOP-2 合理價差跳動"
+        message = (
+            f"合理價差 {prev_fair:+.1f} → {fair:+.1f}（{jump:+.1f} 點）\n"
+            f"通常＝某大權值股除息日估計跨過結算日邊界。\n"
+            f"請人工核對除息資料、估計日期、市場價差、流動性與風險條件。\n"
+            f"本警報不代表任何部位條件已成立。"
+        )
+        emit_alert(title, message, cfg, replay_mode=bool(replay))
     if mkt and abs(mkt[2] - fair) >= float(cfg.get("spread_gap_alert", 8)):
-        notify("📊 SOP-2 市場價差偏離合理值",
-               f"市場 {mkt[2]:+.1f} vs 合理 {fair:+.1f}（差 {mkt[2] - fair:+.1f} 點）\n"
-               f"注意：這是用「已公告」除息算的合理值，請檢查未公告權值股與資料時點。\n"
-               f"這是模型差異觀察，不代表交易指示。", cfg)
+        title = "📊 SOP-2 市場價差偏離合理值"
+        message = (
+            f"市場 {mkt[2]:+.1f} vs 合理 {fair:+.1f}（差 {mkt[2] - fair:+.1f} 點）\n"
+            f"注意：這是用「已公告」除息算的合理值，請檢查未公告權值股與資料時點。\n"
+            f"這是模型差異觀察，不代表交易指示。"
+        )
+        emit_alert(title, message, cfg, replay_mode=bool(replay))
+
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--replay",
+        type=Path,
+        metavar="CASE_DIR",
+        help="從 scenario.json 與原始 fixture payload 執行確定性離線重播",
+    )
+    args = parser.parse_args(argv)
+    try:
+        return run(args.replay)
+    except ReplayScenarioError as e:
+        print(f"[error] replay scenario 無效: {e}", file=sys.stderr)
+        return 2
+    except ReplaySourceError as e:
+        print(f"[error] replay 來源無效: {e}", file=sys.stderr)
+        return 1
+    except RuntimeError as e:
+        if not args.replay:
+            raise
+        print(f"[error] replay 來源無效: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

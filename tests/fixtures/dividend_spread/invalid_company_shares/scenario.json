@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "as_of_date": "2026-07-01",
+  "model": {
+    "hedge_discount_points": 5,
+    "spread_jump_alert": 10,
+    "spread_gap_alert": 8
+  },
+  "sources": {
+    "twse_company_shares": "twse_company_shares.json",
+    "twse_closing_prices": "twse_closing_prices.json",
+    "twse_index": "twse_index.json",
+    "twse_dividend_events": "twse_dividend_events.json",
+    "taifex_futures": "taifex_futures.csv"
+  }
+}
