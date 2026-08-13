@@ -258,11 +258,10 @@ def today_dividends(
         try:
             code = q["Code"].strip()
             closing_price = float(q["ClosingPrice"].replace(",", ""))
-            if strict_source and (
-                not code or not math.isfinite(closing_price) or closing_price <= 0
-            ):
+            if strict_source and not code:
                 raise ValueError
-            close[code] = closing_price
+            if math.isfinite(closing_price) and closing_price > 0:
+                close[code] = closing_price
         except (ValueError, AttributeError, KeyError, TypeError) as e:
             if strict_source:
                 raise ReplaySourceError("twse_closes: 收盤價資料列無效") from e

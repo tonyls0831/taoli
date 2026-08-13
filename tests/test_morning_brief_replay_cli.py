@@ -217,6 +217,33 @@ class MorningBriefReplayCliTest(unittest.TestCase):
 
         self.assertEqual(observed, expected, stderr)
 
+    def test_replay_ignores_unrelated_stock_without_positive_close(self):
+        with (
+            copied_replay_case() as case_dir,
+            tempfile.TemporaryDirectory() as temp_dir,
+        ):
+            closes_path = case_dir / "twse_closes.json"
+            closes = json.loads(closes_path.read_text(encoding="utf-8"))
+            closes.append({"Code": "9999", "ClosingPrice": "0"})
+            closes_path.write_text(
+                json.dumps(closes, ensure_ascii=False), encoding="utf-8"
+            )
+            output_dir = Path(temp_dir) / "briefs"
+            result = run_replay(case_dir, output_dir)
+            report_exists = (output_dir / "2026-07-01.md").exists()
+
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        observed = {
+            "returncode": result.returncode,
+            "report_written": report_exists,
+        }
+        expected = {
+            "returncode": 0,
+            "report_written": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
     def test_replay_fails_clearly_when_yahoo_tsm_has_insufficient_closes(self):
         with copied_replay_case() as case_dir, tempfile.TemporaryDirectory() as temp_dir:
             (case_dir / "yahoo_tsm.json").write_text(
