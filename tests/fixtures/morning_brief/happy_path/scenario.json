@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "run_at": "2026-07-01T07:10:00+08:00",
+  "sources": {
+    "yahoo": {
+      "^DJI": "yahoo_dji.json",
+      "^GSPC": "yahoo_sp500.json",
+      "^IXIC": "yahoo_nasdaq.json",
+      "^SOX": "yahoo_sox.json",
+      "TSM": "yahoo_tsm.json"
+    },
+    "taifex_night": "taifex_night.csv",
+    "twse_dividends": "twse_dividends.json",
+    "twse_closes": "twse_closes.json",
+    "twse_t86": {
+      "20260630": "twse_t86.json"
+    }
+  }
+}
