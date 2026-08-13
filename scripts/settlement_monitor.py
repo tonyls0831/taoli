@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """SOP-3/4 結算日監控器：即時結算均價 + 鎖定區間 +（可選）期現價差。
 
-原理：股票期貨結算價 = 結算日 12:30–13:25 現貨每 5 秒快照（660 個）
+原理：股票期貨結算價 = 結算日 12:30（不含）–13:25 現貨每 5 秒快照（660 個）
 ＋ 13:30 收盤價，共 661 個數字的算術平均。
 本腳本每 5 秒抓一次現貨即時價，維護：
   - 目前累計均值 M
@@ -29,6 +29,7 @@ from common import (TZ, load_config, make_session, notify, now_taipei,
 MIS_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
 TAIFEX_MIS = "https://mis.taifex.com.tw/futures/api/getQuoteDetail"
 TOTAL_SAMPLES = 661          # 660 個 5 秒快照 + 收盤價
+SAMPLE_LATE_TOLERANCE_SECONDS = 1
 
 
 class ReplayScenarioError(Exception):
@@ -197,9 +198,9 @@ def load_replay_case(case_dir: Path) -> dict:
     if start.date() != as_of_date:
         raise ReplaySourceError("twse_spot: start 日期與 as_of_date 不一致")
     if (start.hour, start.minute, start.second, start.microsecond) != (
-        12, 30, 0, 0
+        12, 30, 5, 0
     ):
-        raise ReplaySourceError("twse_spot: start 必須是 12:30:00")
+        raise ReplaySourceError("twse_spot: start 必須是 12:30:05")
     if len(payloads) != TOTAL_SAMPLES + 1:
         raise ReplaySourceError(
             f"twse_spot: 必須提供初始報價與 {TOTAL_SAMPLES} 筆樣本"
@@ -249,7 +250,7 @@ def load_replay_case(case_dir: Path) -> dict:
 
 
 def tick_size(price: float) -> float:
-    for bound, tick in ((10, 0.01), (50, 0.05), (100, 0.1), (500, 0.5), (1000, 1)):
+    for bound, tick in ((10, 0.01), (50, 0.05), (100, 0.1), (500, 0.5), (2500, 1)):
         if price < bound:
             return tick
     return 5.0
@@ -320,7 +321,7 @@ def run(args, replay: dict | None = None) -> int:
         args.stock = replay["stock"]
         args.futures_symbol = replay["futures_symbol"]
         args.force = True
-        args.max_iter = TOTAL_SAMPLES
+        args.max_iter = 0
         now = session.now
         sleep = lambda _seconds: None
         print(f"[settlement_monitor] 離線重播 {replay['as_of_date']}")
@@ -356,13 +357,25 @@ def run(args, replay: dict | None = None) -> int:
         print("[warn] 抓不到漲跌停價，鎖定區間無法計算（收盤後測試屬正常）")
     print(f"[settlement_monitor] {args.stock} {q0['name']}｜昨收 {q0['prev_close']}"
           f"｜漲停 {q0['limit_up']}｜跌停 {q0['limit_dn']}")
-    print(f"結算均價 = 12:30–13:25 每 5 秒快照 660 個 + 收盤價，共 {TOTAL_SAMPLES} 個的平均\n")
+    print(f"結算均價 = 12:30（不含）–13:25 每 5 秒快照 660 個 + 收盤價，共 {TOTAL_SAMPLES} 個的平均\n")
 
-    start = now().replace(hour=12, minute=30, second=0, microsecond=0)
-    if now() < start and not args.force:
-        wait = (start - now()).total_seconds()
-        print(f"等待 12:30 開始取樣（{wait / 60:.1f} 分鐘）…")
+    current = now()
+    start = current.replace(hour=12, minute=30, second=5, microsecond=0)
+    if current < start and not args.force:
+        wait = (start - current).total_seconds()
+        print(f"等待 12:30:05 開始取樣（{wait / 60:.1f} 分鐘）…")
         sleep(max(0, wait))
+    if (
+        not replay_mode
+        and not args.force
+        and now() > start + timedelta(seconds=SAMPLE_LATE_TOLERANCE_SECONDS)
+    ):
+        print(
+            "[error] 已錯過 12:30:05 第一個正式取樣時點；"
+            "無法重建完整 660 筆盤中樣本",
+            file=sys.stderr,
+        )
+        return 1
 
     samples: list[float] = []
     last_price = q0["last"] or q0["prev_close"]
@@ -370,10 +383,35 @@ def run(args, replay: dict | None = None) -> int:
     futures_enabled = bool(args.futures_symbol) and not (
         replay_mode and replay["futures_warning"]
     )
-    n_iter = 0
+    if replay_mode:
+        intraday_target = TOTAL_SAMPLES - 1
+    elif args.max_iter:
+        intraday_target = min(args.max_iter, TOTAL_SAMPLES - 1)
+    elif args.force:
+        intraday_target = 12
+    else:
+        intraday_target = TOTAL_SAMPLES - 1
+    absolute_schedule = replay_mode or not args.force
 
-    while True:
-        n_iter += 1
+    while len(samples) < intraday_target:
+        if absolute_schedule:
+            sample_at = start + timedelta(seconds=len(samples) * 5)
+            current = now()
+            if current < sample_at:
+                sleep((sample_at - current).total_seconds())
+            if now() > sample_at + timedelta(
+                seconds=SAMPLE_LATE_TOLERANCE_SECONDS
+            ):
+                message = (
+                    "twse_spot: 已錯過正式 5 秒取樣時點 "
+                    f"{sample_at.strftime('%H:%M:%S')}"
+                )
+                if replay_mode:
+                    raise ReplaySourceError(message)
+                print(f"[error] {message}", file=sys.stderr)
+                return 1
+        elif samples:
+            sleep(5)
         try:
             q = fetch_spot(session, args.stock)
             if q["last"]:
@@ -437,15 +475,46 @@ def run(args, replay: dict | None = None) -> int:
                         sound=not locked_announced,
                     )
 
-        end = now().replace(hour=13, minute=30, second=10, microsecond=0)
-        if (args.max_iter and n_iter >= args.max_iter) or (now() > end and not args.force) \
-                or (args.force and args.max_iter == 0 and n_iter >= 12):
-            break
-        sleep(5)
+    if intraday_target == TOTAL_SAMPLES - 1:
+        print("盤中樣本已收滿 660 筆；等待 13:30 收盤價")
+        close_ready = now().replace(
+            hour=13, minute=30, second=10, microsecond=0
+        )
+        if not replay_mode and now() < close_ready:
+            sleep((close_ready - now()).total_seconds())
+        try:
+            close_quote = fetch_spot(session, args.stock)
+            close_price = close_quote["last"]
+        except Exception as e:
+            if replay_mode:
+                raise ReplaySourceError("twse_spot: 沒有有效收盤價") from e
+            print(f"[error] 無法取得有效收盤價: {e}", file=sys.stderr)
+            return 1
+        if not close_price:
+            if replay_mode:
+                raise ReplaySourceError("twse_spot: 沒有有效收盤價")
+            print("[error] 無法取得有效收盤價", file=sys.stderr)
+            return 1
+        samples.append(close_price)
+        stamp = now().strftime("%H:%M:%S")
+        print(
+            f"[{stamp}] 收盤價={close_price:.2f} "
+            f"n={len(samples)}/{TOTAL_SAMPLES}"
+        )
 
     print(f"\n最終估計均值 {sum(samples) / len(samples):.4f}（樣本 {len(samples)} 筆）")
     print("提醒：正式結算價以期交所公告為準（含收盤價那一筆）。")
     return 0
+
+
+def nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError("必須是非負整數") from e
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("必須是非負整數")
+    return parsed
 
 
 def main(argv=None) -> int:
@@ -453,7 +522,12 @@ def main(argv=None) -> int:
     ap.add_argument("--stock", help="現貨代號，例 2603")
     ap.add_argument("--futures-symbol", default="", help="TAIFEX MIS 股期代號（選填，SOP-4 用）")
     ap.add_argument("--force", action="store_true", help="忽略結算日/時段檢查（測試）")
-    ap.add_argument("--max-iter", type=int, default=0, help="最多抓幾次（0=直到 13:30）")
+    ap.add_argument(
+        "--max-iter",
+        type=nonnegative_int,
+        default=0,
+        help="最多抓幾次（0=直到 13:30）",
+    )
     ap.add_argument(
         "--replay",
         type=Path,
