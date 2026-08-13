@@ -1,6 +1,5 @@
 # Secrets and local runtime configuration
-.env
-.env.*
+.env*
 !.env.example
 /scripts/config.json
 

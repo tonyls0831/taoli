@@ -28,7 +28,7 @@
 
 | 類別 | 規則 |
 |---|---|
-| Environment | `.env`、`.env.*`；保留可追蹤 `!.env.example` |
+| Environment | 完整 `.env*`（含 `.envrc`／`.envrc.local`）；保留可追蹤 `!.env.example` |
 | Runtime config | `/scripts/config.json` |
 | Runtime state | `/data/*_state.json` |
 | Logs | `*.log` |
@@ -37,6 +37,10 @@
 
 `.obsidian/app.json`、`appearance.json`、`community-plugins.json`、`core-plugins.json`
 是刻意追蹤的共享 vault 設定；內容結構與 credential scan 均無命中。未發現 ignore gap。
+
+Code Review 額外發現原規則 `.env`／`.env.*` 沒有涵蓋 `.envrc`；已修正為完整
+`.env*`。`git check-ignore --no-index` 的空白 filename probes 證實 `.env`、
+`.env.local`、`.envrc`、`.envrc.local` 均 ignored，而 `.env.example` 保持可追蹤。
 
 ## Hidden dependency and repair
 
