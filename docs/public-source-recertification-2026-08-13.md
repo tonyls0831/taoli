@@ -98,6 +98,12 @@ owner-accepted limitation。Probe 沒有輸出 live fair spread；模型結果�
 - [TAIFEX 臺股期貨契約](https://www.taifex.com.tw/cht/2/tX?menuid1=12)：最後交易日／結算日為交割月份第三個星期三；遇假日或不可抗力依官方規則調整。
 - [TAIFEX 盤後資料下載](https://www.taifex.com.tw/cht/3/dlFutDailyMarketView)：確認盤後 CSV 的官方下載 context。
 
+最初 Issue 留言只泛稱 official pages，沒有逐頁列出 URL，屬程序偏差。補記
+[exact-page restatement](https://github.com/tonyls0831/taoli/issues/16#issuecomment-5279340553)
+後，上列五個 exact pages 各以 timeout 15 秒、零 retry／redirect 單次重讀；皆為
+HTTP 200、HTML 且 page title 符合預期。完成結果保存於
+[Issue #16](https://github.com/tonyls0831/taoli/issues/16#issuecomment-5279354976)。
+
 ## Issue #17：`settlement_monitor.py`
 
 ### Bounded command、quote feeds 與分類
@@ -126,6 +132,12 @@ python -c "import requests; from requests.adapters import HTTPAdapter; s=request
   `RtData.QuoteList[]`／`RtData.Quote{}` shape，分類為
   **owner-accepted limitation**。選用期貨路徑不影響必要 TWSE replay。
 
+最初 Issue 留言未精確列出後來用於 symbol discovery 的兩頁，屬程序偏差。補記
+[exact-page restatement](https://github.com/tonyls0831/taoli/issues/17#issuecomment-5279341453)
+後，兩個 symbol pages 與三個 rule／contract pages 各以 timeout 15 秒、零
+retry／redirect 單次重讀；皆為 HTTP 200，ISIN 頁為 Big5 HTML 且其餘 title 符合預期。
+完成結果保存於 [Issue #17](https://github.com/tonyls0831/taoli/issues/17#issuecomment-5279355090)。
+
 ### 正式結算規則與修正
 
 [TAIFEX 股票期貨最後結算價公式](https://www.taifex.com.tw/cht/5/formulaStock)確認：
@@ -140,6 +152,12 @@ python -c "import requests; from requests.adapters import HTTPAdapter; s=request
 改為第一筆 12:30:05，並將 1 元級距延伸至未滿 2,500 元；完整 settlement replay／
 safety suite 11 項通過。
 
+Code Review 另發現 production 原本在每次 HTTP 完成後固定 sleep 5 秒，會把 request
+latency 累積進 cadence。現在 live path 以 12:30:05 為絕對錨點，逐筆排到 13:25:00；
+晚啟動或錯過任一正式 5 秒時點超過 1 秒就清楚失敗，不會把延遲樣本或 13:25 後報價
+冒充完整序列。公開 replay regression 明確核對第一筆 12:30:05、最後盤中一筆
+13:25:00、盤中 660 筆完成訊息與獨立收盤價。
+
 模型鎖定區間只是使用正式公式前提的研究估計，不是 TAIFEX 公告的正式結算價，也不代表
 下單建議。
 
@@ -150,14 +168,41 @@ safety suite 11 項通過。
 Invocation 為單一 `python -` in-memory probe；安全輸出目標沒有建立：
 
 ```powershell
-python -c "import sys; sys.path.insert(0,'scripts'); from datetime import date; from urllib3.util.retry import Retry; from common import make_session; from morning_brief import YAHOO,yahoo_quote,night_session_tx,today_dividends,t86_top; s=make_session(('query1.finance.yahoo.com','www.taifex.com.tw','openapi.twse.com.tw','www.twse.com.tw')); [setattr(a,'max_retries',Retry(total=0)) for a in s.adapters.values()]; g,p=s.get,s.post; s.get=lambda url,**kw:g(url,allow_redirects=False,**kw); s.post=lambda url,**kw:p(url,allow_redirects=False,**kw); y={k:yahoo_quote(s,k,strict_source=True) is not None for k in YAHOO.values()}; n=night_session_tx(s,date(2026,8,13),strict_source=True); d=today_dividends(s,date(2026,8,13),strict_source=True); td,t=t86_top(s,date(2026,8,13),strict_source=True); print({'yahoo':y,'night_ok':n is not None,'dividends':len(d),'t86_date':td.isoformat(),'t86_categories':len(t)})"
+@'
+import sys
+sys.path.insert(0, "scripts")
+from datetime import date
+from urllib3.util.retry import Retry
+from common import make_session
+from morning_brief import YAHOO, yahoo_quote, night_session_tx, today_dividends, t86_top
+
+s = make_session()
+for adapter in s.adapters.values():
+    adapter.max_retries = Retry(total=0)
+get, post = s.get, s.post
+s.get = lambda url, **kwargs: get(url, allow_redirects=False, **kwargs)
+s.post = lambda url, **kwargs: post(url, allow_redirects=False, **kwargs)
+
+def probe(name, operation):
+    try:
+        print({name: operation()})
+    except Exception as error:
+        print({name: type(error).__name__})
+
+for symbol in YAHOO.values():
+    probe(f"yahoo[{symbol}]", lambda symbol=symbol: yahoo_quote(s, symbol, strict_source=True) is not None)
+probe("taifex_night", lambda: night_session_tx(s, date(2026, 8, 13), strict_source=True) is not None)
+probe("twse_dividends", lambda: len(today_dividends(s, date(2026, 8, 13), strict_source=True)))
+probe("twse_t86", lambda: (lambda result: {"date": result[0].isoformat(), "categories": len(result[1])})(t86_top(s, date(2026, 8, 13), strict_source=True)))
+'@ | python -
 ```
 
 Request manifest：Yahoo 每個 symbol 都帶 query `range=5d&interval=1d`；TAIFEX form
 為 `down_type=1`、`commodity_id=TX`、`queryStartDate=2026/08/01`、
 `queryEndDate=2026/08/13`；T86 每次帶 `date=YYYYMMDD`、`selectType=ALL`、
-`response=json`，從 2026-08-12 往前最多五次並在第一個 `stat=OK` 停止。初次 probe
-的每個 provider 都以獨立 try/catch 執行，所以單一路徑失敗不會阻止後續 bounded read。
+`response=json`，從 2026-08-12 往前最多五次並在第一個 `stat=OK` 停止。上述保存的
+failure-isolated command 對每個 provider 獨立 try/catch，所以 dividend parser 失敗不會
+阻止 T86 bounded read；輸出只含 parser boolean/count 或 exception type。
 
 | Method／timeout | Endpoint／範圍 | Fixture／parser 結果與分類 |
 |---|---|---|
@@ -187,6 +232,12 @@ result count、keys 與 `all_numeric_finite`。兩次額外 reads 的事前 mani
 - [TWSE T86 商品說明](https://eshop.twse.com.tw/zh/product/detail/c4c87ac184e44896a05fcab5a9d544ec)確認每日三大法人買賣超資料與欄位 context。
 - [TAIFEX 期貨每日行情](https://www.taifex.com.tw/cht/3/futDailyMarketView)確認盤後／夜盤資料入口與日期 context。
 - Yahoo Finance 僅作盤前觀察資料，不能取代交易所正式資料；availability、調整方式與 symbol shape 都沒有本專案可依賴的 SLA。
+
+最初 Issue 留言只泛稱 official pages，沒有逐頁列出 URL，屬程序偏差。補記
+[exact-page restatement](https://github.com/tonyls0831/taoli/issues/18#issuecomment-5279341268)
+後，上列三個 exact pages 各以 timeout 15 秒、零 retry／redirect 單次重讀；皆為
+HTTP 200、HTML 且 page title 符合預期。完成結果保存於
+[Issue #18](https://github.com/tonyls0831/taoli/issues/18#issuecomment-5279355465)。
 
 ## 使用與再認證條件
 

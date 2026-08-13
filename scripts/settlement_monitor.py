@@ -29,6 +29,7 @@ from common import (TZ, load_config, make_session, notify, now_taipei,
 MIS_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
 TAIFEX_MIS = "https://mis.taifex.com.tw/futures/api/getQuoteDetail"
 TOTAL_SAMPLES = 661          # 660 個 5 秒快照 + 收盤價
+SAMPLE_LATE_TOLERANCE_SECONDS = 1
 
 
 class ReplayScenarioError(Exception):
@@ -358,11 +359,23 @@ def run(args, replay: dict | None = None) -> int:
           f"｜漲停 {q0['limit_up']}｜跌停 {q0['limit_dn']}")
     print(f"結算均價 = 12:30（不含）–13:25 每 5 秒快照 660 個 + 收盤價，共 {TOTAL_SAMPLES} 個的平均\n")
 
-    start = now().replace(hour=12, minute=30, second=5, microsecond=0)
-    if now() < start and not args.force:
-        wait = (start - now()).total_seconds()
+    current = now()
+    start = current.replace(hour=12, minute=30, second=5, microsecond=0)
+    if current < start and not args.force:
+        wait = (start - current).total_seconds()
         print(f"等待 12:30:05 開始取樣（{wait / 60:.1f} 分鐘）…")
         sleep(max(0, wait))
+    if (
+        not replay_mode
+        and not args.force
+        and now() > start + timedelta(seconds=SAMPLE_LATE_TOLERANCE_SECONDS)
+    ):
+        print(
+            "[error] 已錯過 12:30:05 第一個正式取樣時點；"
+            "無法重建完整 660 筆盤中樣本",
+            file=sys.stderr,
+        )
+        return 1
 
     samples: list[float] = []
     last_price = q0["last"] or q0["prev_close"]
@@ -378,8 +391,27 @@ def run(args, replay: dict | None = None) -> int:
         intraday_target = 12
     else:
         intraday_target = TOTAL_SAMPLES - 1
+    absolute_schedule = replay_mode or not args.force
 
     while len(samples) < intraday_target:
+        if absolute_schedule:
+            sample_at = start + timedelta(seconds=len(samples) * 5)
+            current = now()
+            if current < sample_at:
+                sleep((sample_at - current).total_seconds())
+            if now() > sample_at + timedelta(
+                seconds=SAMPLE_LATE_TOLERANCE_SECONDS
+            ):
+                message = (
+                    "twse_spot: 已錯過正式 5 秒取樣時點 "
+                    f"{sample_at.strftime('%H:%M:%S')}"
+                )
+                if replay_mode:
+                    raise ReplaySourceError(message)
+                print(f"[error] {message}", file=sys.stderr)
+                return 1
+        elif samples:
+            sleep(5)
         try:
             q = fetch_spot(session, args.stock)
             if q["last"]:
@@ -442,9 +474,6 @@ def run(args, replay: dict | None = None) -> int:
                         replay_mode=replay_mode,
                         sound=not locked_announced,
                     )
-
-        if len(samples) < intraday_target:
-            sleep(5)
 
     if intraday_target == TOTAL_SAMPLES - 1:
         print("盤中樣本已收滿 660 筆；等待 13:30 收盤價")
