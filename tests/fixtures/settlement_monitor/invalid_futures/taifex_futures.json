@@ -1,0 +1,12 @@
+{
+  "runs": [
+    {
+      "repeat": 1,
+      "payload": {
+        "RtData": {
+          "QuoteList": []
+        }
+      }
+    }
+  ]
+}

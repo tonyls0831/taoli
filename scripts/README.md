@@ -62,8 +62,16 @@ python dividend_spread.py --replay ..\tests\fixtures\dividend_spread\happy_path
 「剩餘樣本全走漲/跌停」的**鎖定區間**；區間寬 < 1 tick 時警報並顯示模型區間參考。
 - `--futures-symbol <TAIFEX代號>` 加開 SOP-4 期現價差監控（>0.5% 警報）
 - `--force --max-iter 3` = 盤後測試模式
+- `--replay <case-dir>` = 依 `scenario.json` 與原始 TWSE／選用 TAIFEX fixture 時序
+  做有界離線重播；不等待、不連網、不讀寫設定或 runtime 資料，也不蜂鳴或推播
 - ⚠️ MIS 是免費揭示源，與交易所正式 5 秒快照可能有零星差異；正式結算價以期交所公告為準
 - ⚠️ 模型區間不是保證結算價；樣本、tick、資料延遲與正式結算規則都必須人工核對
+
+離線重播範例：
+
+```powershell
+python settlement_monitor.py --replay ..\tests\fixtures\settlement_monitor\happy_path
+```
 
 ### morning_brief.py（SOP-5）
 產出當日盤前簡報到 `盤前簡報/日期.md`：美股四大＋台積電 ADR、台指期夜盤收盤、
