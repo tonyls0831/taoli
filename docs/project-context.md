@@ -1,6 +1,6 @@
 # Taoli project context
 
-最後更新：2026-08-12
+最後更新：2026-08-13
 
 ## 專案定位
 
@@ -18,6 +18,7 @@ Taoli 是一個以 Obsidian 為載體的交易策略研究 vault。現有材料�
 - Phase 4 建立 private GitHub repository `tonyls0831/taoli`、`origin/main` 與 GitHub Issues triage labels；repository 文件提交為 `9f629c6296200cca42df649578d826decb45fd52`。
 - Phase 5 已完成第一輪 Codex-native Issue → TDD → branch → CI → review → squash merge 流程；GitHub Issue #1 已關閉，PR #2 合併為 `a8347d83dd450cceb48d04e7b783aa494ebb4d12`，Python 3.10／3.14 CI 皆通過。第一個 public seam 是 `typhoon_watch.py --once --source-file <fixture.html>`。
 - Phase 6–9 的遷移完成標準、治理與驗收路線已由 repository owner 於 2026-08-12 核准，正式規格見 `docs/codex-migration-completion-plan.md`；後續工作由 GitHub Issue #3 與 child Issues #4–#20 管理。
+- Phase 8 已於 2026-08-13 對四支工具的 DGPA、TWSE、TAIFEX 與 Yahoo 資料路徑做 bounded live-read 再認證；逐端點結果、fixture 差異與保留限制見 `docs/public-source-recertification-2026-08-13.md`。
 - Claude 的寬鬆 shell allowlist、一次性暫存路徑與舊 whisper.cpp scratchpad 沒有遷入 Codex。
 
 ## 已保存的研究材料
@@ -50,7 +51,7 @@ Taoli 是一個以 Obsidian 為載體的交易策略研究 vault。現有材料�
 
 它們以公開資料源執行，主要來源包括 DGPA、TWSE OpenAPI、TWSE MIS、TAIFEX 盤後資料、TAIFEX MIS、Yahoo Finance 與 TWSE T86。免費或非正式揭示端點沒有 SLA，頁面格式、憑證、限流與欄位都可能改變。
 
-Claude-era 紀錄顯示四支工具曾於 2026-07-17 對真實資料執行；這只是歷史驗證時間點。任何關鍵日使用前仍須重新做最小 smoke test，並以交易所或政府正式公告作最終依據。
+Claude-era 紀錄顯示四支工具曾於 2026-07-17 對真實資料執行；Phase 8 又在 2026-08-13 做過單次、有界的來源再認證。這些都只是歷史驗證時間點。任何關鍵日使用前仍須重新做最小 smoke test，並以交易所或政府正式公告作最終依據。
 
 ## 本機與機密狀態
 
