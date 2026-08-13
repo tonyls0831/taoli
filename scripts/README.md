@@ -76,7 +76,20 @@ python settlement_monitor.py --replay ..\tests\fixtures\settlement_monitor\happy
 ### morning_brief.py（SOP-5）
 產出當日盤前簡報到 `盤前簡報/日期.md`：美股四大＋台積電 ADR、台指期夜盤收盤、
 **今日除息名單**（含參考價與幅度，>10% 標⭐＝SOP-5 觀察股）、三大法人買賣超 Top。
+- `--replay <case-dir> --output-dir <safe-dir>` = 依 `scenario.json` 與原始 Yahoo／
+  TAIFEX／TWSE fixtures 固定重播時間，將完整簡報寫入明示安全目錄的日期檔名；
+  不連網、不讀寫設定、不通知或蜂鳴，也不改寫既有檔案；安全目錄不得位於
+  repository 內（包含正式 `盤前簡報/`）
+- ⚠️ replay 簡報只驗證資料解析與盤前研究呈現，仍須人工核對現行市場資料與規則；
+  不是下單建議或交易授權
 - 搭配 SOP-5 人工流程：8:30 看試撮 → **8:43 期貨禁刪單後**判斷開盤合理性
+
+離線重播範例：
+
+```powershell
+python morning_brief.py --replay ..\tests\fixtures\morning_brief\happy_path `
+  --output-dir $env:TEMP\taoli-morning-brief-replay
+```
 
 ## 排程建議（Windows 工作排程器）
 
