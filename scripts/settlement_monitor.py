@@ -320,7 +320,7 @@ def run(args, replay: dict | None = None) -> int:
         args.stock = replay["stock"]
         args.futures_symbol = replay["futures_symbol"]
         args.force = True
-        args.max_iter = TOTAL_SAMPLES
+        args.max_iter = 0
         now = session.now
         sleep = lambda _seconds: None
         print(f"[settlement_monitor] 離線重播 {replay['as_of_date']}")
@@ -370,10 +370,16 @@ def run(args, replay: dict | None = None) -> int:
     futures_enabled = bool(args.futures_symbol) and not (
         replay_mode and replay["futures_warning"]
     )
-    n_iter = 0
+    if replay_mode:
+        intraday_target = TOTAL_SAMPLES - 1
+    elif args.max_iter:
+        intraday_target = min(args.max_iter, TOTAL_SAMPLES - 1)
+    elif args.force:
+        intraday_target = 12
+    else:
+        intraday_target = TOTAL_SAMPLES - 1
 
-    while True:
-        n_iter += 1
+    while len(samples) < intraday_target:
         try:
             q = fetch_spot(session, args.stock)
             if q["last"]:
@@ -437,11 +443,35 @@ def run(args, replay: dict | None = None) -> int:
                         sound=not locked_announced,
                     )
 
-        end = now().replace(hour=13, minute=30, second=10, microsecond=0)
-        if (args.max_iter and n_iter >= args.max_iter) or (now() > end and not args.force) \
-                or (args.force and args.max_iter == 0 and n_iter >= 12):
-            break
-        sleep(5)
+        if len(samples) < intraday_target:
+            sleep(5)
+
+    if intraday_target == TOTAL_SAMPLES - 1:
+        print("盤中樣本已收滿 660 筆；等待 13:30 收盤價")
+        close_ready = now().replace(
+            hour=13, minute=30, second=10, microsecond=0
+        )
+        if not replay_mode and now() < close_ready:
+            sleep((close_ready - now()).total_seconds())
+        try:
+            close_quote = fetch_spot(session, args.stock)
+            close_price = close_quote["last"]
+        except Exception as e:
+            if replay_mode:
+                raise ReplaySourceError("twse_spot: 沒有有效收盤價") from e
+            print(f"[error] 無法取得有效收盤價: {e}", file=sys.stderr)
+            return 1
+        if not close_price:
+            if replay_mode:
+                raise ReplaySourceError("twse_spot: 沒有有效收盤價")
+            print("[error] 無法取得有效收盤價", file=sys.stderr)
+            return 1
+        samples.append(close_price)
+        stamp = now().strftime("%H:%M:%S")
+        print(
+            f"[{stamp}] 收盤價={close_price:.2f} "
+            f"n={len(samples)}/{TOTAL_SAMPLES}"
+        )
 
     print(f"\n最終估計均值 {sum(samples) / len(samples):.4f}（樣本 {len(samples)} 筆）")
     print("提醒：正式結算價以期交所公告為準（含收盤價那一筆）。")

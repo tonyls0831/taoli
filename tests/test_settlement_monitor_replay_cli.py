@@ -63,8 +63,11 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
         observed = {
             "returncode": result.returncode,
             "fixed_date": "離線重播 2026-08-19" in stdout,
+            "intraday_window_complete": (
+                "盤中樣本已收滿 660 筆；等待 13:30 收盤價" in stdout
+            ),
             "close_is_distinct": (
-                "[13:30:00] n=661/661 價=110.00 均=100.0151" in stdout
+                "[13:30:00] 收盤價=110.00 n=661/661" in stdout
             ),
             "known_mean": "最終估計均值 100.0151（樣本 661 筆）" in stdout,
             "model_alert": "SOP-3 結算價模型區間縮窄" in stdout,
@@ -75,6 +78,7 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
         expected = {
             "returncode": 0,
             "fixed_date": True,
+            "intraday_window_complete": True,
             "close_is_distinct": True,
             "known_mean": True,
             "model_alert": True,

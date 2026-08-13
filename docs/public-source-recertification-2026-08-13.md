@@ -31,8 +31,15 @@
 
 ### Bounded command 與來源
 
-- Invocation：單一 `python -` probe，以 `make_session(("www.dgpa.gov.tw",))` 建立既有
-  relaxed-SSL session，adapter retry 設為 0。
+- Invocation：下列 sanitized command 是實際 `python -` probe 的可重現等價形式；只輸出
+  response metadata、markup count 與 parser count，不輸出公告內容：
+
+```powershell
+python -c "import sys; sys.path.insert(0,'scripts'); from urllib3.util.retry import Retry; from common import make_session; from typhoon_watch import URL,parse_status_html; s=make_session(('www.dgpa.gov.tw',)); [setattr(a,'max_retries',Retry(total=0)) for a in s.adapters.values()]; r=s.get(URL,timeout=20,allow_redirects=False); p=parse_status_html(r.text); print({'status':r.status_code,'bytes':len(r.content),'tables':r.text.count('<table'),'cities':len(p),'taipei':'臺北市' in p})"
+```
+
+- 以 `make_session(("www.dgpa.gov.tw",))` 建立既有 relaxed-SSL session，adapter retry
+  設為 0。
 - 單次 GET：`https://www.dgpa.gov.tw/typh/daily/nds.html`，timeout 20 秒，
   `allow_redirects=False`；只將 response body 交給實際的 `parse_status_html()`。
 - 結果：HTTP 200、`text/html`、15,036 bytes、無 `Location`；頁面 title 為
@@ -60,13 +67,20 @@ DGPA 頁面只確認停班停課公告 context，不據此推論交易所休市�
 Invocation 為單一 `python -` probe；每列各一次，停用 retry／redirect，只呼叫既有
 fetch/parser functions，不執行合理價差報告：
 
+```powershell
+python -c "import sys; sys.path.insert(0,'scripts'); from datetime import date; from urllib3.util.retry import Retry; from common import make_session; from dividend_spread import get_market_cap_per_point,get_dividend_events,get_market_spread; s=make_session(('openapi.twse.com.tw','mis.twse.com.tw','www.taifex.com.tw')); [setattr(a,'max_retries',Retry(total=0)) for a in s.adapters.values()]; g,p=s.get,s.post; s.get=lambda url,**kw:g(url,allow_redirects=False,**kw); s.post=lambda url,**kw:p(url,allow_redirects=False,**kw); cap,idx,shares=get_market_cap_per_point(s,strict_sources=True); events=get_dividend_events(s,shares,cap,strict_sources=True); futures=get_market_spread(s,'202608','202609',date(2026,8,13),strict_source=True); print({'shares':len(shares),'index_ok':idx>0,'events':len(events),'futures_ok':futures is not None})"
+```
+
+這個 command 的 helper request manifest 如下；表單與 query parameters 是 command 的
+一部分，輸出不含指數、期貨價格或合理價差：
+
 | Method／timeout | Endpoint | Live 結果 |
 |---|---|---|
 | GET／30s | `https://openapi.twse.com.tw/v1/opendata/t187ap03_L` | HTTP 200；list 1,095 列，1,095 列有公司代號與普通股／TDR 股數欄，parser 1,095 列。 |
 | GET／30s | `https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL` | HTTP 200；list 1,379 列，必要 `Code`／`ClosingPrice` shape 可供市值 parser 使用。 |
 | GET／10s | `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0` | HTTP 200；dict／`msgArray` 1 列；`z`／`y`／`pz` fallback 得到有效指數。實際 timeout 依程式為 10s，非授權留言誤載的 15s。 |
 | GET／30s | `https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL` | HTTP 200；list 137 列，92 列有有效正現金股利日期；與股數 join 後得到 86 個事件，日期範圍 2026-08-11 至 2026-10-07。 |
-| POST／30s | `https://www.taifex.com.tw/cht/3/futDataDown` | HTTP 200；Big5 CSV 19 欄／214 列；54 列為 TX 一般時段，日期 2026-08-03 至 2026-08-13；近／次月 parser 成功。 |
+| POST／30s | `https://www.taifex.com.tw/cht/3/futDataDown`；form `down_type=1`、`commodity_id=TX`、`queryStartDate=2026/08/01`、`queryEndDate=2026/08/13` | HTTP 200；Big5 CSV 19 欄／214 列；54 列為 TX 一般時段，日期 2026-08-03 至 2026-08-13；近／次月 parser 成功。 |
 
 OpenAPI fixtures 保留同名原始欄位與最小列；live 的公司股數、收盤價與 TWT48U 必要欄位
 相容。TAIFEX live CSV 比 fixture 的 18 欄多 1 欄，但 parser 依 header 名稱取值，沒有因
@@ -90,17 +104,26 @@ owner-accepted limitation。Probe 沒有輸出 live fair spread；模型結果�
 
 兩個 quote endpoint 均只執行一次；沒有進入 5 秒 polling loop：
 
+```powershell
+python -c "import requests; from requests.adapters import HTTPAdapter; s=requests.Session(); s.mount('https://',HTTPAdapter(max_retries=0)); p=s.get('https://mis.twse.com.tw/stock/api/getStockInfo.jsp',params={'ex_ch':'tse_2330.tw','json':'1','delay':'0'},timeout=10,allow_redirects=False).json(); q=p.get('msgArray',[{}])[0]; print({'rows':len(p.get('msgArray',[])),'fields_present':all(k in q for k in ('z','y','pz','u','w','n','t'))})"
+python -c "import requests; from requests.adapters import HTTPAdapter; s=requests.Session(); s.mount('https://',HTTPAdapter(max_retries=0)); r=s.post('https://mis.taifex.com.tw/futures/api/getQuoteDetail',json={'SymbolID':'CDFH6-F'},timeout=10,allow_redirects=False); print({'status':r.status_code,'content_type':r.headers.get('Content-Type',''),'bytes':len(r.content),'location_present':bool(r.headers.get('Location'))})"
+```
+
 - TWSE：`python -` 單次 GET
   `https://mis.twse.com.tw/stock/api/getStockInfo.jsp`，參數
   `ex_ch=tse_2330.tw&json=1&delay=0`，timeout 10 秒。HTTP 200，top-level dict、
   `msgArray` 1 列，`z`／`y`／`pz`／`u`／`w`／`n`／`t` 均存在，last price 可解析。
   與 fixture 的 `msgArray: [object]` 及 fallback 欄位相容，分類為 **usable**。Production
   會以 `tse_{stock}.tw|otc_{stock}.tw` 同時查上市／上櫃；本次依核准參數只驗證上市代號。
-- TAIFEX：先由 TAIFEX 商品資料與 TWSE ISIN 資料確認當期台積電股票期貨為 `CDFH6`，
-  形成 endpoint convention `CDFH6-F`；接著以 `python -` 單次 POST
+- TAIFEX：先由 [TAIFEX 期貨大額交易人未沖銷部位結構表](https://www.taifex.com.tw/cht/3/largeTraderFutQryTbl)
+  確認台積電期貨有 2026/08 契約，再由 [TWSE ISIN 期貨與選擇權清單](https://isin.twse.com.tw/isin/e_C_public.jsp?strMode=6)
+  精確確認當期代號 `CDFH6`，形成 endpoint convention `CDFH6-F`；接著以單次 POST
   `https://mis.taifex.com.tw/futures/api/getQuoteDetail`，JSON
-  `{"SymbolID":"CDFH6-F"}`，timeout 10 秒。請求得到 HTTP error，沒有重試；因此無法
-  比對 fixture 的 `RtData.QuoteList[]`／`RtData.Quote{}` shape，分類為
+  `{"SymbolID":"CDFH6-F"}`，timeout 10 秒。第一次請求得到 generic HTTP error；經
+  [Issue #17 留言](https://github.com/tonyls0831/taoli/issues/17#issuecomment-5279240337)
+  記錄的同 request、status-only 診斷得到 HTTP 400、`application/json`、547 bytes、
+  無 redirect。診斷沒有讀取或解析 body，因此仍無法比對 fixture 的
+  `RtData.QuoteList[]`／`RtData.Quote{}` shape，分類為
   **owner-accepted limitation**。選用期貨路徑不影響必要 TWSE replay。
 
 ### 正式結算規則與修正
@@ -126,6 +149,16 @@ safety suite 11 項通過。
 
 Invocation 為單一 `python -` in-memory probe；安全輸出目標沒有建立：
 
+```powershell
+python -c "import sys; sys.path.insert(0,'scripts'); from datetime import date; from urllib3.util.retry import Retry; from common import make_session; from morning_brief import YAHOO,yahoo_quote,night_session_tx,today_dividends,t86_top; s=make_session(('query1.finance.yahoo.com','www.taifex.com.tw','openapi.twse.com.tw','www.twse.com.tw')); [setattr(a,'max_retries',Retry(total=0)) for a in s.adapters.values()]; g,p=s.get,s.post; s.get=lambda url,**kw:g(url,allow_redirects=False,**kw); s.post=lambda url,**kw:p(url,allow_redirects=False,**kw); y={k:yahoo_quote(s,k,strict_source=True) is not None for k in YAHOO.values()}; n=night_session_tx(s,date(2026,8,13),strict_source=True); d=today_dividends(s,date(2026,8,13),strict_source=True); td,t=t86_top(s,date(2026,8,13),strict_source=True); print({'yahoo':y,'night_ok':n is not None,'dividends':len(d),'t86_date':td.isoformat(),'t86_categories':len(t)})"
+```
+
+Request manifest：Yahoo 每個 symbol 都帶 query `range=5d&interval=1d`；TAIFEX form
+為 `down_type=1`、`commodity_id=TX`、`queryStartDate=2026/08/01`、
+`queryEndDate=2026/08/13`；T86 每次帶 `date=YYYYMMDD`、`selectType=ALL`、
+`response=json`，從 2026-08-12 往前最多五次並在第一個 `stat=OK` 停止。初次 probe
+的每個 provider 都以獨立 try/catch 執行，所以單一路徑失敗不會阻止後續 bounded read。
+
 | Method／timeout | Endpoint／範圍 | Fixture／parser 結果與分類 |
 |---|---|---|
 | GET／15s，各一次 | `https://query1.finance.yahoo.com/v8/finance/chart/{symbol}`；`^DJI`、`^GSPC`、`^IXIC`、`^SOX`、`TSM` | 五個 response 都有兩個 finite closes，與 chart fixture 相容；**owner-accepted limitation**（非官方、無 SLA）。 |
@@ -139,6 +172,14 @@ Invocation 為單一 `python -` in-memory probe；安全輸出目標沒有建立
 `bef9b8214290184619d092656d6bbdee217cdf75` 改為略過不相關的無效收盤列，同時保留「當日
 事件缺有效收盤價就點名來源失敗」的必要保護。修復後只重讀兩個 TWSE endpoint 各一次，
 strict parser 成功且沒有輸出證券或價格。
+
+初次、診斷與修復後重測各自的 exact TWSE requests 均為 GET
+`TWT48U_ALL` 與 GET `STOCK_DAY_ALL`、timeout 30 秒；診斷 command 只計算
+`other_date`／`valid_today`／`nonpositive_close`／`today_code_has_close` 類別數，重測
+command 只執行 `today_dividends(session, date(2026,8,13), strict_source=True)` 並輸出
+result count、keys 與 `all_numeric_finite`。兩次額外 reads 的事前 manifests 分別保存於
+[diagnostic 留言](https://github.com/tonyls0831/taoli/issues/18#issuecomment-5278996616)與
+[post-fix retest 留言](https://github.com/tonyls0831/taoli/issues/18#issuecomment-5279019145)。
 
 ### 官方事實與非官方限制
 
