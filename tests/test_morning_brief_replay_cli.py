@@ -120,14 +120,43 @@ class MorningBriefReplayCliTest(unittest.TestCase):
                 b"malformed\n",
                 "taifex_night",
             ),
+            "nonfinite_taifex": (
+                "taifex_night.csv",
+                (HAPPY_PATH / "taifex_night.csv")
+                .read_bytes()
+                .replace(b"22500", b"NaN"),
+                "taifex_night",
+            ),
             "invalid_dividends": (
                 "twse_dividends.json",
                 b"{}\n",
                 "twse_dividends",
             ),
+            "invalid_dividend_date": (
+                "twse_dividends.json",
+                json.dumps(
+                    [
+                        {
+                            "Date": {"unexpected": True},
+                            "Code": "2330",
+                            "Name": "台積電",
+                            "CashDividend": "20",
+                        }
+                    ],
+                    ensure_ascii=False,
+                ).encode("utf-8"),
+                "twse_dividends",
+            ),
             "invalid_closes": (
                 "twse_closes.json",
                 b"{}\n",
+                "twse_closes",
+            ),
+            "nonfinite_closes": (
+                "twse_closes.json",
+                json.dumps(
+                    [{"Code": "2330", "ClosingPrice": "NaN"}]
+                ).encode("utf-8"),
                 "twse_closes",
             ),
             "invalid_t86": (

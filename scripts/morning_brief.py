@@ -151,8 +151,9 @@ def load_replay_case(case_dir: Path) -> tuple[datetime, ReplaySession]:
         case_dir, "taifex_night", sources.get("taifex_night")
     )
     try:
-        loaded["taifex_night"] = taifex_path.read_bytes()
-        loaded["taifex_night"].decode("big5")
+        loaded["taifex_night"] = taifex_path.read_text(
+            encoding="utf-8"
+        ).encode("big5")
     except (OSError, UnicodeError) as e:
         raise ReplaySourceError(
             f"taifex_night: fixture CSV 無效 ({type(e).__name__})"
@@ -222,9 +223,14 @@ def night_session_tx(
     near = [f for f in rows if f[0] == latest_date][0]
     if strict_source:
         try:
-            float(near[6].replace(",", ""))
-            float(near[7].replace(",", ""))
-            float(near[8].replace("%", "").replace(",", ""))
+            values = (
+                float(near[6].replace(",", "")),
+                float(near[7].replace(",", "")),
+                float(near[8].replace("%", "").replace(",", "")),
+            )
+            if not all(math.isfinite(value) for value in values):
+                raise ValueError
+            datetime.strptime(near[0], "%Y/%m/%d")
         except (ValueError, AttributeError) as e:
             raise ReplaySourceError("taifex_night: 盤後數值欄位無效") from e
     return latest_date, near[2], near[6], near[7], near[8]   # 日期, 月份, 收盤, 漲跌, 漲跌%
@@ -250,7 +256,13 @@ def today_dividends(
         if strict_source and not isinstance(q, dict):
             raise ReplaySourceError("twse_closes: 資料列必須是物件")
         try:
-            close[q["Code"].strip()] = float(q["ClosingPrice"].replace(",", ""))
+            code = q["Code"].strip()
+            closing_price = float(q["ClosingPrice"].replace(",", ""))
+            if strict_source and (
+                not code or not math.isfinite(closing_price) or closing_price <= 0
+            ):
+                raise ValueError
+            close[code] = closing_price
         except (ValueError, AttributeError, KeyError, TypeError) as e:
             if strict_source:
                 raise ReplaySourceError("twse_closes: 收盤價資料列無效") from e
@@ -260,11 +272,27 @@ def today_dividends(
     for row in rows:
         if strict_source and not isinstance(row, dict):
             raise ReplaySourceError("twse_dividends: 資料列必須是物件")
-        if roc_to_date(row.get("Date", "")) != today:
+        raw_date = row.get("Date", "")
+        if strict_source and not isinstance(raw_date, str):
+            raise ReplaySourceError("twse_dividends: 日期欄位無效")
+        event_date = roc_to_date(raw_date)
+        if strict_source and raw_date and event_date is None:
+            raise ReplaySourceError("twse_dividends: 日期欄位無效")
+        if event_date != today:
             continue
-        code = (row.get("Code") or "").strip()
+        raw_code = row.get("Code")
+        raw_name = row.get("Name")
+        if strict_source and (
+            not isinstance(raw_code, str)
+            or not raw_code.strip()
+            or not isinstance(raw_name, str)
+        ):
+            raise ReplaySourceError("twse_dividends: 股票代號或名稱欄位無效")
+        code = (raw_code or "").strip()
         try:
             cash = float((row.get("CashDividend") or "0").replace(",", "") or 0)
+            if strict_source and (not math.isfinite(cash) or cash < 0):
+                raise ValueError
         except (ValueError, AttributeError) as e:
             if strict_source:
                 raise ReplaySourceError("twse_dividends: 現金股利欄位無效") from e
@@ -276,7 +304,7 @@ def today_dividends(
             )
         ref = (prev - cash) if (prev and cash) else None
         pct = (cash / prev * 100) if (prev and cash) else 0
-        out.append({"code": code, "name": (row.get("Name") or "").strip(),
+        out.append({"code": code, "name": (raw_name or "").strip(),
                     "cash": cash, "prev": prev, "ref": ref, "pct": pct})
     out.sort(key=lambda x: -x["pct"])
     return out
@@ -319,6 +347,8 @@ def t86_top(
             def parse(rows, idx):
                 out = []
                 for row in rows:
+                    if strict_source and not isinstance(row, list):
+                        raise ReplaySourceError("twse_t86: 法人資料列無效")
                     try:
                         v = int(row[idx].replace(",", "")) // 1000
                         out.append((row[i_code].strip(), row[i_name].strip(), v))
@@ -355,8 +385,12 @@ def build_brief(session, run_at: datetime, *, replay: bool = False):
                 lines.append(f"- {name}：{q[0]:,.2f}（{q[1]:+.2f}%）")
                 summary.append(f"{name} {q[1]:+.1f}%")
         except Exception as e:
-            if replay and isinstance(e, ReplaySourceError):
-                raise
+            if replay:
+                if isinstance(e, ReplaySourceError):
+                    raise
+                raise ReplaySourceError(
+                    f"yahoo[{sym}]: payload 格式無效"
+                ) from e
             lines.append(f"- {name}：抓取失敗（{type(e).__name__}）")
     lines.append("")
 
@@ -370,8 +404,10 @@ def build_brief(session, run_at: datetime, *, replay: bool = False):
         else:
             lines.append("- 無夜盤資料")
     except Exception as e:
-        if replay and isinstance(e, (ReplayScenarioError, ReplaySourceError)):
-            raise
+        if replay:
+            if isinstance(e, (ReplayScenarioError, ReplaySourceError)):
+                raise
+            raise ReplaySourceError("taifex_night: payload 格式無效") from e
         lines.append(f"- 夜盤抓取失敗（{type(e).__name__}）")
     lines.append("")
 
@@ -380,8 +416,12 @@ def build_brief(session, run_at: datetime, *, replay: bool = False):
     try:
         divs = today_dividends(session, today, strict_source=replay)
     except Exception as e:
-        if replay and isinstance(e, (ReplayScenarioError, ReplaySourceError)):
-            raise
+        if replay:
+            if isinstance(e, (ReplayScenarioError, ReplaySourceError)):
+                raise
+            raise ReplaySourceError(
+                "twse_dividends/twse_closes: payload 格式無效"
+            ) from e
         lines.append(f"（除權息名單抓取失敗：{e}）")
     lines += [f"## 今日除息名單（{len(divs)} 檔）", ""]
     if divs:
@@ -404,7 +444,14 @@ def build_brief(session, run_at: datetime, *, replay: bool = False):
     lines.append("")
 
     # 4. 三大法人
-    qd, tops = t86_top(session, today, strict_source=replay)
+    try:
+        qd, tops = t86_top(session, today, strict_source=replay)
+    except Exception as e:
+        if replay:
+            if isinstance(e, (ReplayScenarioError, ReplaySourceError)):
+                raise
+            raise ReplaySourceError("twse_t86: payload 格式無效") from e
+        raise
     if tops:
         lines += [f"## 三大法人買賣超（{qd}，張）", ""]
         for k, rows in tops.items():
