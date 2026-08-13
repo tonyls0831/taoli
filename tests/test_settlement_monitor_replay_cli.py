@@ -33,6 +33,7 @@ def run_replay(
     case_dir: Path,
     *,
     env_overrides: dict[str, str] | None = None,
+    extra_args: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env.update(
@@ -44,7 +45,7 @@ def run_replay(
     )
     env.update(env_overrides or {})
     return subprocess.run(
-        [sys.executable, str(SCRIPT), "--replay", str(case_dir)],
+        [sys.executable, str(SCRIPT), "--replay", str(case_dir), *extra_args],
         cwd=ROOT,
         env=env,
         stdout=subprocess.PIPE,
@@ -215,6 +216,23 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
             "nonzero_exit": True,
             "source_named": True,
             "fixed_cadence_reported": True,
+            "traceback_hidden": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
+    def test_cli_rejects_negative_max_iter_without_traceback(self):
+        result = run_replay(HAPPY_PATH, extra_args=("--max-iter", "-1"))
+        stderr = result.stderr.decode("utf-8", errors="replace")
+
+        observed = {
+            "returncode": result.returncode,
+            "invalid_value_reported": "非負整數" in stderr,
+            "traceback_hidden": "Traceback" not in stderr,
+        }
+        expected = {
+            "returncode": 2,
+            "invalid_value_reported": True,
             "traceback_hidden": True,
         }
 

@@ -507,12 +507,27 @@ def run(args, replay: dict | None = None) -> int:
     return 0
 
 
+def nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError("必須是非負整數") from e
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("必須是非負整數")
+    return parsed
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--stock", help="現貨代號，例 2603")
     ap.add_argument("--futures-symbol", default="", help="TAIFEX MIS 股期代號（選填，SOP-4 用）")
     ap.add_argument("--force", action="store_true", help="忽略結算日/時段檢查（測試）")
-    ap.add_argument("--max-iter", type=int, default=0, help="最多抓幾次（0=直到 13:30）")
+    ap.add_argument(
+        "--max-iter",
+        type=nonnegative_int,
+        default=0,
+        help="最多抓幾次（0=直到 13:30）",
+    )
     ap.add_argument(
         "--replay",
         type=Path,
