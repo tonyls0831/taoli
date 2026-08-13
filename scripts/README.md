@@ -5,7 +5,9 @@
 
 ## 環境
 
-- Python 3.10+（本機 3.14 已測通過），`pip install requests beautifulsoup4`
+- Python 3.10+（本機 3.14 已測通過）
+- 從 repository 根目錄安裝 tracked runtime dependencies：
+  `python -m pip install --disable-pip-version-check -r requirements.txt`
 - 第一次執行任一腳本會自動產生 `config.json`；要手機推播就填：
   - `discord_webhook`：Discord 頻道 → 整合 → Webhook → 複製網址（最簡單）
   - 或 `telegram_bot_token` + `telegram_chat_id`
