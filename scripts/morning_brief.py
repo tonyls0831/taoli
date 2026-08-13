@@ -10,8 +10,11 @@
 """
 import argparse
 import json
+import math
+import os
 import re
 import sys
+import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -78,7 +81,7 @@ def _fixture_path(case_dir: Path, source_name: str, relative_path) -> Path:
     except ValueError as e:
         raise ReplayScenarioError(f"{source_name}: fixture 路徑不得離開 case-dir") from e
     if not path.is_file():
-        raise ReplayScenarioError(f"{source_name}: 找不到 fixture {relative_path}")
+        raise ReplaySourceError(f"{source_name}: 找不到 fixture {relative_path}")
     return path
 
 
@@ -87,7 +90,7 @@ def _load_json_fixture(case_dir: Path, source_name: str, relative_path):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as e:
-        raise ReplayScenarioError(
+        raise ReplaySourceError(
             f"{source_name}: fixture JSON 無效 ({type(e).__name__})"
         ) from e
 
@@ -148,11 +151,10 @@ def load_replay_case(case_dir: Path) -> tuple[datetime, ReplaySession]:
         case_dir, "taifex_night", sources.get("taifex_night")
     )
     try:
-        loaded["taifex_night"] = taifex_path.read_text(
-            encoding="utf-8"
-        ).encode("big5")
+        loaded["taifex_night"] = taifex_path.read_bytes()
+        loaded["taifex_night"].decode("big5")
     except (OSError, UnicodeError) as e:
-        raise ReplayScenarioError(
+        raise ReplaySourceError(
             f"taifex_night: fixture CSV 無效 ({type(e).__name__})"
         ) from e
     return run_at, ReplaySession(loaded)
@@ -165,16 +167,16 @@ def yahoo_quote(session, symbol: str, *, strict_source: bool = False):
     try:
         res = r.json()["chart"]["result"][0]
         closes = [
-            c for c in res["indicators"]["quote"][0]["close"]
-            if c is not None
+            float(c) for c in res["indicators"]["quote"][0]["close"]
+            if c is not None and math.isfinite(float(c))
         ]
-    except (KeyError, IndexError, TypeError) as e:
+    except (KeyError, IndexError, TypeError, ValueError, OverflowError) as e:
         if strict_source:
             raise ReplaySourceError(
                 f"yahoo[{symbol}]: payload 格式無效"
             ) from e
         raise
-    if len(closes) < 2:
+    if len(closes) < 2 or closes[-2] == 0:
         if strict_source:
             raise ReplaySourceError(
                 f"yahoo[{symbol}]: 沒有兩筆有效收盤價"
@@ -184,7 +186,12 @@ def yahoo_quote(session, symbol: str, *, strict_source: bool = False):
     return last, (last - prev) / prev * 100
 
 
-def night_session_tx(session, today: date | None = None):
+def night_session_tx(
+    session,
+    today: date | None = None,
+    *,
+    strict_source: bool = False,
+):
     """台指期近月「盤後」時段最新收盤與漲跌%。"""
     today = today or now_taipei().date()
     r = session.post("https://www.taifex.com.tw/cht/3/futDataDown",
@@ -193,43 +200,80 @@ def night_session_tx(session, today: date | None = None):
                            "queryEndDate": today.strftime("%Y/%m/%d")},
                      timeout=30)
     r.raise_for_status()
-    lines = r.content.decode("big5", errors="replace").splitlines()
+    try:
+        lines = r.content.decode(
+            "big5", errors="strict" if strict_source else "replace"
+        ).splitlines()
+    except UnicodeError as e:
+        raise ReplaySourceError(
+            "taifex_night: Big5 CSV 解碼失敗"
+        ) from e
     rows = []
     for ln in lines[1:]:
         f = [x.strip() for x in ln.split(",")]
         if len(f) >= 18 and f[1] == "TX" and re.fullmatch(r"\d{6}", f[2]) and "盤後" in (f[17] or ""):
             rows.append(f)
     if not rows:
+        if strict_source:
+            raise ReplaySourceError("taifex_night: 沒有有效盤後資料")
         return None
     rows.sort(key=lambda f: (f[0], f[2]))
     latest_date = rows[-1][0]
     near = [f for f in rows if f[0] == latest_date][0]
+    if strict_source:
+        try:
+            float(near[6].replace(",", ""))
+            float(near[7].replace(",", ""))
+            float(near[8].replace("%", "").replace(",", ""))
+        except (ValueError, AttributeError) as e:
+            raise ReplaySourceError("taifex_night: 盤後數值欄位無效") from e
     return latest_date, near[2], near[6], near[7], near[8]   # 日期, 月份, 收盤, 漲跌, 漲跌%
 
 
-def today_dividends(session, today: date | None = None):
+def today_dividends(
+    session,
+    today: date | None = None,
+    *,
+    strict_source: bool = False,
+):
     """今日除息名單 + 參考價。"""
     rows = session.get("https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL",
                        timeout=30).json()
     quotes = session.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
                          timeout=30).json()
+    if strict_source and not isinstance(rows, list):
+        raise ReplaySourceError("twse_dividends: payload 必須是陣列")
+    if strict_source and not isinstance(quotes, list):
+        raise ReplaySourceError("twse_closes: payload 必須是陣列")
     close = {}
     for q in quotes:
+        if strict_source and not isinstance(q, dict):
+            raise ReplaySourceError("twse_closes: 資料列必須是物件")
         try:
             close[q["Code"].strip()] = float(q["ClosingPrice"].replace(",", ""))
-        except (ValueError, AttributeError, KeyError):
+        except (ValueError, AttributeError, KeyError, TypeError) as e:
+            if strict_source:
+                raise ReplaySourceError("twse_closes: 收盤價資料列無效") from e
             pass
     today = today or now_taipei().date()
     out = []
     for row in rows:
+        if strict_source and not isinstance(row, dict):
+            raise ReplaySourceError("twse_dividends: 資料列必須是物件")
         if roc_to_date(row.get("Date", "")) != today:
             continue
         code = (row.get("Code") or "").strip()
         try:
             cash = float((row.get("CashDividend") or "0").replace(",", "") or 0)
-        except ValueError:
+        except (ValueError, AttributeError) as e:
+            if strict_source:
+                raise ReplaySourceError("twse_dividends: 現金股利欄位無效") from e
             cash = 0.0
         prev = close.get(code)
+        if strict_source and code and prev is None:
+            raise ReplaySourceError(
+                f"twse_closes: 缺少今日除息股票 {code} 的有效收盤價"
+            )
         ref = (prev - cash) if (prev and cash) else None
         pct = (cash / prev * 100) if (prev and cash) else 0
         out.append({"code": code, "name": (row.get("Name") or "").strip(),
@@ -238,7 +282,12 @@ def today_dividends(session, today: date | None = None):
     return out
 
 
-def t86_top(session, today: date | None = None):
+def t86_top(
+    session,
+    today: date | None = None,
+    *,
+    strict_source: bool = False,
+):
     """昨交易日三大法人買賣超 Top10（外資/投信，張）。"""
     from datetime import timedelta
     d = today or now_taipei().date()
@@ -248,11 +297,24 @@ def t86_top(session, today: date | None = None):
                         params={"date": qd.strftime("%Y%m%d"), "selectType": "ALL",
                                 "response": "json"}, timeout=30)
         j = r.json()
+        if strict_source and not isinstance(j, dict):
+            raise ReplaySourceError("twse_t86: payload 必須是物件")
         if j.get("stat") == "OK" and j.get("data"):
-            fields, data = j["fields"], j["data"]
-            i_code, i_name = 0, 1
-            i_foreign = next(i for i, f in enumerate(fields) if "外陸資買賣超" in f)
-            i_trust = next(i for i, f in enumerate(fields) if f.startswith("投信買賣超"))
+            try:
+                fields, data = j["fields"], j["data"]
+                if not isinstance(fields, list) or not isinstance(data, list):
+                    raise TypeError
+                i_code, i_name = 0, 1
+                i_foreign = next(
+                    i for i, f in enumerate(fields) if "外陸資買賣超" in f
+                )
+                i_trust = next(
+                    i for i, f in enumerate(fields) if f.startswith("投信買賣超")
+                )
+            except (KeyError, TypeError, StopIteration) as e:
+                if strict_source:
+                    raise ReplaySourceError("twse_t86: 欄位格式無效") from e
+                raise
 
             def parse(rows, idx):
                 out = []
@@ -260,7 +322,11 @@ def t86_top(session, today: date | None = None):
                     try:
                         v = int(row[idx].replace(",", "")) // 1000
                         out.append((row[i_code].strip(), row[i_name].strip(), v))
-                    except (ValueError, IndexError):
+                    except (ValueError, IndexError, AttributeError, TypeError) as e:
+                        if strict_source:
+                            raise ReplaySourceError(
+                                "twse_t86: 法人資料列無效"
+                            ) from e
                         pass
                 return out
 
@@ -270,6 +336,8 @@ def t86_top(session, today: date | None = None):
             t_all.sort(key=lambda x: x[2])
             return qd, {"外資買超": f_all[::-1][:10], "外資賣超": f_all[:10],
                         "投信買超": t_all[::-1][:10], "投信賣超": t_all[:10]}
+    if strict_source:
+        raise ReplaySourceError("twse_t86: 沒有有效法人資料")
     return None, {}
 
 
@@ -295,21 +363,25 @@ def build_brief(session, run_at: datetime, *, replay: bool = False):
     # 2. 夜盤
     lines += ["## 台指期夜盤", ""]
     try:
-        ns = night_session_tx(session, today)
+        ns = night_session_tx(session, today, strict_source=replay)
         if ns:
             lines.append(f"- {ns[0]} 夜盤 {ns[1]}：收 {ns[2]}（{ns[3]}｜{ns[4]}）")
             summary.append(f"夜盤 {ns[4]}")
         else:
             lines.append("- 無夜盤資料")
     except Exception as e:
+        if replay and isinstance(e, (ReplayScenarioError, ReplaySourceError)):
+            raise
         lines.append(f"- 夜盤抓取失敗（{type(e).__name__}）")
     lines.append("")
 
     # 3. 今日除權息
     divs = []
     try:
-        divs = today_dividends(session, today)
+        divs = today_dividends(session, today, strict_source=replay)
     except Exception as e:
+        if replay and isinstance(e, (ReplayScenarioError, ReplaySourceError)):
+            raise
         lines.append(f"（除權息名單抓取失敗：{e}）")
     lines += [f"## 今日除息名單（{len(divs)} 檔）", ""]
     if divs:
@@ -332,7 +404,7 @@ def build_brief(session, run_at: datetime, *, replay: bool = False):
     lines.append("")
 
     # 4. 三大法人
-    qd, tops = t86_top(session, today)
+    qd, tops = t86_top(session, today, strict_source=replay)
     if tops:
         lines += [f"## 三大法人買賣超（{qd}，張）", ""]
         for k, rows in tops.items():
@@ -353,10 +425,10 @@ def build_brief(session, run_at: datetime, *, replay: bool = False):
 def _replay_output_path(case_dir: Path, output_dir: Path, run_at: datetime) -> Path:
     case_dir = case_dir.resolve()
     output_dir = output_dir.resolve()
-    formal_brief_dir = BRIEF_DIR.resolve()
+    repository_dir = VAULT_DIR.resolve()
     for protected_dir, message in (
         (case_dir, "output-dir 不得位於 replay case-dir 內"),
-        (formal_brief_dir, "output-dir 不得位於正式盤前簡報目錄"),
+        (repository_dir, "output-dir 不得位於 repository 內"),
     ):
         try:
             output_dir.relative_to(protected_dir)
@@ -377,28 +449,50 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        help="replay 簡報的明示安全輸出目錄（不得使用正式盤前簡報目錄）",
+        help="replay 簡報的明示安全輸出目錄（不得位於 repository 內）",
     )
     args = parser.parse_args(argv)
     if bool(args.replay) != bool(args.output_dir):
         parser.error("--replay 與 --output-dir 必須同時使用")
 
     if args.replay:
+        out = None
+        temp_path = None
         try:
             run_at, session = load_replay_case(args.replay)
-            lines, _ = build_brief(session, run_at, replay=True)
             out = _replay_output_path(args.replay, args.output_dir, run_at)
             out.parent.mkdir(parents=True, exist_ok=True)
-            with out.open("x", encoding="utf-8", newline="\n") as report:
+            if out.exists():
+                raise FileExistsError(f"輸出檔已存在: {out}")
+            lines, _ = build_brief(session, run_at, replay=True)
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                newline="\n",
+                dir=out.parent,
+                prefix=".morning-brief-replay-",
+                suffix=".tmp",
+                delete=False,
+            ) as report:
+                temp_path = Path(report.name)
                 report.write("\n".join(lines) + "\n")
+            os.link(temp_path, out)
+            temp_path.unlink()
+            temp_path = None
         except ReplaySourceError as e:
             print(f"[error] replay source 無效: {e}", file=sys.stderr)
             return 1
-        except (ReplayScenarioError, FileExistsError) as e:
+        except (ReplayScenarioError, OSError) as e:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             print(f"[error] replay scenario 無效: {e}", file=sys.stderr)
             return 2
         print(f"離線重播 {run_at.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"簡報已寫入 {out}")
+        print("本離線重播僅供盤前研究與人工核對，不是下單或交易授權。")
         return 0
 
     cfg = load_config()

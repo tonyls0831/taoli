@@ -77,6 +77,9 @@ class MorningBriefReplayCliTest(unittest.TestCase):
         observed = {
             "returncode": result.returncode,
             "fixed_time": "離線重播 2026-07-01 07:10:00" in stdout,
+            "console_human_boundary": (
+                "僅供盤前研究與人工核對，不是下單或交易授權" in stdout
+            ),
             "report_written": report.startswith("# 盤前簡報 2026-07-01（三）"),
             "known_yahoo_move": "台積電ADR：184.50（+2.50%）" in report,
             "known_night_session": "2026/06/30 夜盤 202607：收 22500" in report,
@@ -93,6 +96,7 @@ class MorningBriefReplayCliTest(unittest.TestCase):
         expected = {
             "returncode": 0,
             "fixed_time": True,
+            "console_human_boundary": True,
             "report_written": True,
             "known_yahoo_move": True,
             "known_night_session": True,
@@ -100,6 +104,86 @@ class MorningBriefReplayCliTest(unittest.TestCase):
             "known_institutional": True,
             "fixed_generated_at": True,
             "human_boundary": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
+    def test_replay_names_each_invalid_provider_without_writing_report(self):
+        invalid_sources = {
+            "missing_taifex": (
+                "taifex_night.csv",
+                None,
+                "taifex_night",
+            ),
+            "invalid_taifex": (
+                "taifex_night.csv",
+                b"malformed\n",
+                "taifex_night",
+            ),
+            "invalid_dividends": (
+                "twse_dividends.json",
+                b"{}\n",
+                "twse_dividends",
+            ),
+            "invalid_closes": (
+                "twse_closes.json",
+                b"{}\n",
+                "twse_closes",
+            ),
+            "invalid_t86": (
+                "twse_t86.json",
+                b"{}\n",
+                "twse_t86",
+            ),
+        }
+
+        for case_name, (filename, replacement, source_name) in invalid_sources.items():
+            with (
+                self.subTest(case=case_name),
+                copied_replay_case() as case_dir,
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
+                source_path = case_dir / filename
+                if replacement is None:
+                    source_path.unlink()
+                else:
+                    source_path.write_bytes(replacement)
+                output_dir = Path(temp_dir) / "briefs"
+                result = run_replay(case_dir, output_dir)
+                report_exists = (output_dir / "2026-07-01.md").exists()
+
+            stderr = result.stderr.decode("utf-8", errors="replace")
+            observed = {
+                "returncode": result.returncode,
+                "source_named": source_name in stderr,
+                "traceback_hidden": "Traceback" not in stderr,
+                "report_absent": not report_exists,
+            }
+            expected = {
+                "returncode": 1,
+                "source_named": True,
+                "traceback_hidden": True,
+                "report_absent": True,
+            }
+
+            self.assertEqual(observed, expected, stderr)
+
+    def test_replay_rejects_output_io_error_without_traceback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            blocking_file = Path(temp_dir) / "not-a-directory"
+            blocking_file.write_text("occupied", encoding="utf-8")
+            result = run_replay(HAPPY_PATH, blocking_file / "briefs")
+
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        observed = {
+            "returncode": result.returncode,
+            "output_error": "replay scenario 無效" in stderr,
+            "traceback_hidden": "Traceback" not in stderr,
+        }
+        expected = {
+            "returncode": 2,
+            "output_error": True,
+            "traceback_hidden": True,
         }
 
         self.assertEqual(observed, expected, stderr)
@@ -208,6 +292,11 @@ class MorningBriefReplaySafetyTest(unittest.TestCase):
                     BRIEF_DIR,
                     env_overrides=env_overrides,
                 ),
+                run_replay(
+                    HAPPY_PATH,
+                    ROOT / "data" / "replay-output",
+                    env_overrides=env_overrides,
+                ),
             ]
             beep_called = (sentinel_path / "beep_called").exists()
             safe_output_files = [
@@ -234,7 +323,7 @@ class MorningBriefReplaySafetyTest(unittest.TestCase):
             ],
         }
         expected = {
-            "returncodes": [0, 1, 2],
+            "returncodes": [0, 1, 2, 2],
             "network_connections": 0,
             "beep_called": False,
             "config_unchanged": True,
