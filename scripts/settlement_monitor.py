@@ -177,8 +177,10 @@ def load_replay_case(case_dir: Path) -> dict:
     )
     try:
         fixture = json.loads(source_path.read_text(encoding="utf-8"))
-    except FileNotFoundError as e:
-        raise ReplaySourceError("twse_spot: 找不到來源檔案") from e
+    except OSError as e:
+        raise ReplaySourceError(
+            f"twse_spot: 來源檔案無法讀取 ({type(e).__name__})"
+        ) from e
     except (UnicodeError, json.JSONDecodeError) as e:
         raise ReplaySourceError(
             f"twse_spot: 來源檔案無效 ({type(e).__name__})"
@@ -190,8 +192,14 @@ def load_replay_case(case_dir: Path) -> dict:
         payloads = expand_replay_runs(fixture, "twse_spot")
     except (KeyError, TypeError, ValueError) as e:
         raise ReplaySourceError("twse_spot: fixture 時序格式無效") from e
+    if step_seconds != 5:
+        raise ReplaySourceError("twse_spot: step_seconds 必須是 5")
     if start.date() != as_of_date:
         raise ReplaySourceError("twse_spot: start 日期與 as_of_date 不一致")
+    if (start.hour, start.minute, start.second, start.microsecond) != (
+        12, 30, 0, 0
+    ):
+        raise ReplaySourceError("twse_spot: start 必須是 12:30:00")
     if len(payloads) != TOTAL_SAMPLES + 1:
         raise ReplaySourceError(
             f"twse_spot: 必須提供初始報價與 {TOTAL_SAMPLES} 筆樣本"
@@ -213,9 +221,10 @@ def load_replay_case(case_dir: Path) -> dict:
                 futures_fixture = json.loads(
                     futures_path.read_text(encoding="utf-8")
                 )
-            except FileNotFoundError as e:
+            except OSError as e:
                 raise ReplaySourceError(
-                    "taifex_futures: 找不到來源檔案"
+                    "taifex_futures: 來源檔案無法讀取 "
+                    f"({type(e).__name__})"
                 ) from e
             except (UnicodeError, json.JSONDecodeError) as e:
                 raise ReplaySourceError(
@@ -341,6 +350,8 @@ def run(args, replay: dict | None = None) -> int:
         raise
     if replay_mode and not (q0["last"] or q0["prev_close"]):
         raise ReplaySourceError("twse_spot: 沒有有效現貨價格")
+    if replay_mode and not (q0["limit_up"] and q0["limit_dn"]):
+        raise ReplaySourceError("twse_spot: 沒有有效漲跌停價")
     if not (q0["limit_up"] and q0["limit_dn"]):
         print("[warn] 抓不到漲跌停價，鎖定區間無法計算（收盤後測試屬正常）")
     print(f"[settlement_monitor] {args.stock} {q0['name']}｜昨收 {q0['prev_close']}"

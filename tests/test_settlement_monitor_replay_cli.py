@@ -133,6 +133,107 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
 
         self.assertEqual(observed, expected, stderr)
 
+    def test_replay_fails_clearly_without_twse_price_limits(self):
+        with copied_replay_case(HAPPY_PATH) as case_dir:
+            spot_path = case_dir / "twse_spot.json"
+            fixture = json.loads(spot_path.read_text(encoding="utf-8"))
+            initial_quote = fixture["runs"][0]["payload"]["msgArray"][0]
+            initial_quote["u"] = ""
+            initial_quote["w"] = ""
+            spot_path.write_text(
+                json.dumps(fixture, ensure_ascii=False), encoding="utf-8"
+            )
+            result = run_replay(case_dir)
+
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        observed = {
+            "nonzero_exit": result.returncode != 0,
+            "source_named": "twse_spot" in stderr,
+            "invalid_data_reported": "沒有有效漲跌停價" in stderr,
+            "traceback_hidden": "Traceback" not in stderr,
+        }
+        expected = {
+            "nonzero_exit": True,
+            "source_named": True,
+            "invalid_data_reported": True,
+            "traceback_hidden": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
+    def test_replay_fails_clearly_when_twse_fixture_is_unreadable(self):
+        with copied_replay_case(HAPPY_PATH) as case_dir:
+            spot_path = case_dir / "twse_spot.json"
+            spot_path.unlink()
+            spot_path.mkdir()
+            result = run_replay(case_dir)
+
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        observed = {
+            "nonzero_exit": result.returncode != 0,
+            "source_named": "twse_spot" in stderr,
+            "traceback_hidden": "Traceback" not in stderr,
+        }
+        expected = {
+            "nonzero_exit": True,
+            "source_named": True,
+            "traceback_hidden": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
+    def test_replay_rejects_nonfive_second_spot_cadence(self):
+        with copied_replay_case(HAPPY_PATH) as case_dir:
+            spot_path = case_dir / "twse_spot.json"
+            fixture = json.loads(spot_path.read_text(encoding="utf-8"))
+            fixture["step_seconds"] = 10
+            spot_path.write_text(
+                json.dumps(fixture, ensure_ascii=False), encoding="utf-8"
+            )
+            result = run_replay(case_dir)
+
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        observed = {
+            "nonzero_exit": result.returncode != 0,
+            "source_named": "twse_spot" in stderr,
+            "fixed_cadence_reported": "step_seconds 必須是 5" in stderr,
+            "traceback_hidden": "Traceback" not in stderr,
+        }
+        expected = {
+            "nonzero_exit": True,
+            "source_named": True,
+            "fixed_cadence_reported": True,
+            "traceback_hidden": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
+    def test_replay_rejects_spot_sequence_outside_settlement_window(self):
+        with copied_replay_case(HAPPY_PATH) as case_dir:
+            spot_path = case_dir / "twse_spot.json"
+            fixture = json.loads(spot_path.read_text(encoding="utf-8"))
+            fixture["start"] = "2026-08-19T12:31:00+08:00"
+            spot_path.write_text(
+                json.dumps(fixture, ensure_ascii=False), encoding="utf-8"
+            )
+            result = run_replay(case_dir)
+
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        observed = {
+            "nonzero_exit": result.returncode != 0,
+            "source_named": "twse_spot" in stderr,
+            "fixed_window_reported": "start 必須是 12:30:00" in stderr,
+            "traceback_hidden": "Traceback" not in stderr,
+        }
+        expected = {
+            "nonzero_exit": True,
+            "source_named": True,
+            "fixed_window_reported": True,
+            "traceback_hidden": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
     def test_replay_warns_and_degrades_when_taifex_quote_is_invalid(self):
         result = run_replay(INVALID_FUTURES)
         stdout = result.stdout.decode("utf-8", errors="replace")
@@ -155,13 +256,16 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
         self.assertEqual(observed, expected, stderr)
 
     def test_replay_degrades_when_taifex_fixture_cannot_load(self):
-        for case_name in ("missing", "malformed"):
+        for case_name in ("missing", "malformed", "directory"):
             with self.subTest(case=case_name), copied_replay_case(
                 INVALID_FUTURES
             ) as case_dir:
                 futures_path = case_dir / "taifex_futures.json"
                 if case_name == "missing":
                     futures_path.unlink()
+                elif case_name == "directory":
+                    futures_path.unlink()
+                    futures_path.mkdir()
                 else:
                     futures_path.write_text("not-json\n", encoding="utf-8")
                 result = run_replay(case_dir)
