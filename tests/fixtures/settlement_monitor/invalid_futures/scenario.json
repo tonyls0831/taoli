@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "as_of_date": "2026-08-19",
+  "stock": "2603",
+  "futures_symbol": "CDFQ6-F",
+  "model": {
+    "basis_alert_pct": 0.5
+  },
+  "sources": {
+    "twse_spot": "twse_spot.json",
+    "taifex_futures": "taifex_futures.json"
+  }
+}
