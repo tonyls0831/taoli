@@ -1,8 +1,11 @@
+import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
 from tests.replay_safety import file_snapshot, recording_proxy
@@ -16,6 +19,14 @@ INVALID_SPOT = FIXTURE_ROOT / "invalid_spot"
 INVALID_FUTURES = FIXTURE_ROOT / "invalid_futures"
 CONFIG = ROOT / "scripts" / "config.json"
 DATA_DIR = ROOT / "data"
+
+
+@contextmanager
+def copied_replay_case(source: Path):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        case_dir = Path(temp_dir) / source.name
+        shutil.copytree(source, case_dir)
+        yield case_dir
 
 
 def run_replay(
@@ -52,8 +63,10 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
         observed = {
             "returncode": result.returncode,
             "fixed_date": "離線重播 2026-08-19" in stdout,
-            "complete_sequence": "n=661/661" in stdout,
-            "known_mean": "最終估計均值 100.0000（樣本 661 筆）" in stdout,
+            "close_is_distinct": (
+                "[13:30:00] n=661/661 價=110.00 均=100.0151" in stdout
+            ),
+            "known_mean": "最終估計均值 100.0151（樣本 661 筆）" in stdout,
             "model_alert": "SOP-3 結算價模型區間縮窄" in stdout,
             "official_value_separate": "正式結算價以期交所公告為準" in stdout,
             "human_decision": "請人工核對樣本完整性" in stdout,
@@ -62,7 +75,7 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
         expected = {
             "returncode": 0,
             "fixed_date": True,
-            "complete_sequence": True,
+            "close_is_distinct": True,
             "known_mean": True,
             "model_alert": True,
             "official_value_separate": True,
@@ -91,6 +104,35 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
 
         self.assertEqual(observed, expected, stderr)
 
+    def test_replay_fails_clearly_when_twse_spot_has_no_price(self):
+        with copied_replay_case(HAPPY_PATH) as case_dir:
+            spot_path = case_dir / "twse_spot.json"
+            fixture = json.loads(spot_path.read_text(encoding="utf-8"))
+            for run in fixture["runs"]:
+                quote = run["payload"]["msgArray"][0]
+                quote["z"] = ""
+                quote["y"] = ""
+            spot_path.write_text(
+                json.dumps(fixture, ensure_ascii=False), encoding="utf-8"
+            )
+            result = run_replay(case_dir)
+
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        observed = {
+            "nonzero_exit": result.returncode != 0,
+            "source_named": "twse_spot" in stderr,
+            "invalid_data_reported": "沒有有效現貨價格" in stderr,
+            "traceback_hidden": "Traceback" not in stderr,
+        }
+        expected = {
+            "nonzero_exit": True,
+            "source_named": True,
+            "invalid_data_reported": True,
+            "traceback_hidden": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
     def test_replay_warns_and_degrades_when_taifex_quote_is_invalid(self):
         result = run_replay(INVALID_FUTURES)
         stdout = result.stdout.decode("utf-8", errors="replace")
@@ -102,7 +144,7 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
                 "[warn] 期貨報價抓取失敗" in stdout
                 and "taifex_futures" in stdout
             ),
-            "sequence_completed": "最終估計均值 100.0000（樣本 661 筆）" in stdout,
+            "sequence_completed": "最終估計均值 100.0151（樣本 661 筆）" in stdout,
         }
         expected = {
             "returncode": 0,
@@ -111,6 +153,40 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
         }
 
         self.assertEqual(observed, expected, stderr)
+
+    def test_replay_degrades_when_taifex_fixture_cannot_load(self):
+        for case_name in ("missing", "malformed"):
+            with self.subTest(case=case_name), copied_replay_case(
+                INVALID_FUTURES
+            ) as case_dir:
+                futures_path = case_dir / "taifex_futures.json"
+                if case_name == "missing":
+                    futures_path.unlink()
+                else:
+                    futures_path.write_text("not-json\n", encoding="utf-8")
+                result = run_replay(case_dir)
+
+            stdout = result.stdout.decode("utf-8", errors="replace")
+            stderr = result.stderr.decode("utf-8", errors="replace")
+            observed = {
+                "returncode": result.returncode,
+                "source_warning": (
+                    "[warn] 期貨 replay 來源無效" in stdout
+                    and "taifex_futures" in stdout
+                ),
+                "sequence_completed": (
+                    "最終估計均值 100.0151（樣本 661 筆）" in stdout
+                ),
+                "traceback_hidden": "Traceback" not in stderr,
+            }
+            expected = {
+                "returncode": 0,
+                "source_warning": True,
+                "sequence_completed": True,
+                "traceback_hidden": True,
+            }
+
+            self.assertEqual(observed, expected, stderr)
 
 
 class SettlementMonitorReplaySafetyTest(unittest.TestCase):

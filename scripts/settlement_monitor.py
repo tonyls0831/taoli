@@ -73,10 +73,15 @@ class ReplaySession:
             raise ReplaySourceError(f"不支援的 replay GET 來源: {url}")
         if self.cursor >= len(self.payloads):
             raise ReplaySourceError("twse_spot: fixture 樣本已用完")
-        sample_index = max(self.cursor - 1, 0)
-        self.current_time = self.start + timedelta(
-            seconds=sample_index * self.step_seconds
-        )
+        if self.cursor == len(self.payloads) - 1:
+            self.current_time = self.start.replace(
+                hour=13, minute=30, second=0, microsecond=0
+            )
+        else:
+            sample_index = max(self.cursor - 1, 0)
+            self.current_time = self.start + timedelta(
+                seconds=sample_index * self.step_seconds
+            )
         payload = self.payloads[self.cursor]
         self.cursor += 1
         return ReplayResponse(payload)
@@ -94,16 +99,43 @@ class ReplaySession:
         return self.current_time
 
 
-def replay_source_path(case_dir: Path, relative_path: str) -> Path:
+def replay_source_path(
+    case_dir: Path, source_name: str, relative_path: str
+) -> Path:
     if not isinstance(relative_path, str) or not relative_path:
-        raise ReplayScenarioError("sources.twse_spot 必須是相對檔案路徑")
+        raise ReplayScenarioError(
+            f"sources.{source_name} 必須是相對檔案路徑"
+        )
     resolved_case = case_dir.resolve()
     resolved_path = (case_dir / relative_path).resolve()
     try:
         resolved_path.relative_to(resolved_case)
     except ValueError as e:
-        raise ReplayScenarioError("twse_spot: 來源路徑不可離開 case directory") from e
+        raise ReplayScenarioError(
+            f"{source_name}: 來源路徑不可離開 case directory"
+        ) from e
     return resolved_path
+
+
+def expand_replay_runs(fixture: dict, source_name: str) -> list[dict]:
+    if not isinstance(fixture, dict) or not isinstance(fixture.get("runs"), list):
+        raise ReplaySourceError(f"{source_name}: runs 必須是陣列")
+    payloads = []
+    for run in fixture["runs"]:
+        if not isinstance(run, dict):
+            raise ReplaySourceError(f"{source_name}: run 必須是物件")
+        repeat = run.get("repeat")
+        payload = run.get("payload")
+        if (
+            isinstance(repeat, bool)
+            or not isinstance(repeat, int)
+            or repeat < 1
+        ):
+            raise ReplaySourceError(f"{source_name}: repeat 必須是正整數")
+        if not isinstance(payload, dict):
+            raise ReplaySourceError(f"{source_name}: payload 必須是物件")
+        payloads.extend([payload] * repeat)
+    return payloads
 
 
 def load_replay_case(case_dir: Path) -> dict:
@@ -140,7 +172,9 @@ def load_replay_case(case_dir: Path) -> dict:
     sources = scenario.get("sources")
     if not isinstance(sources, dict):
         raise ReplayScenarioError("sources 必須是物件")
-    source_path = replay_source_path(case_dir, sources.get("twse_spot"))
+    source_path = replay_source_path(
+        case_dir, "twse_spot", sources.get("twse_spot")
+    )
     try:
         fixture = json.loads(source_path.read_text(encoding="utf-8"))
     except FileNotFoundError as e:
@@ -153,11 +187,7 @@ def load_replay_case(case_dir: Path) -> dict:
     try:
         start = datetime.fromisoformat(fixture["start"])
         step_seconds = int(fixture["step_seconds"])
-        payloads = [
-            run["payload"]
-            for run in fixture["runs"]
-            for _ in range(int(run["repeat"]))
-        ]
+        payloads = expand_replay_runs(fixture, "twse_spot")
     except (KeyError, TypeError, ValueError) as e:
         raise ReplaySourceError("twse_spot: fixture 時序格式無效") from e
     if start.date() != as_of_date:
@@ -171,28 +201,37 @@ def load_replay_case(case_dir: Path) -> dict:
     if not isinstance(futures_symbol, str):
         raise ReplayScenarioError("futures_symbol 必須是字串")
     futures_payloads = []
+    futures_warning = None
     if futures_symbol:
-        futures_path = replay_source_path(
-            case_dir, sources.get("taifex_futures")
-        )
         try:
-            futures_fixture = json.loads(
-                futures_path.read_text(encoding="utf-8")
+            futures_path = replay_source_path(
+                case_dir,
+                "taifex_futures",
+                sources.get("taifex_futures"),
             )
-            futures_payloads = [
-                run["payload"]
-                for run in futures_fixture["runs"]
-                for _ in range(int(run["repeat"]))
-            ]
-        except FileNotFoundError as e:
-            raise ReplaySourceError("taifex_futures: 找不到來源檔案") from e
-        except (UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-            raise ReplaySourceError("taifex_futures: fixture 格式無效") from e
+            try:
+                futures_fixture = json.loads(
+                    futures_path.read_text(encoding="utf-8")
+                )
+            except FileNotFoundError as e:
+                raise ReplaySourceError(
+                    "taifex_futures: 找不到來源檔案"
+                ) from e
+            except (UnicodeError, json.JSONDecodeError) as e:
+                raise ReplaySourceError(
+                    "taifex_futures: fixture 格式無效"
+                ) from e
+            futures_payloads = expand_replay_runs(
+                futures_fixture, "taifex_futures"
+            )
+        except (ReplayScenarioError, ReplaySourceError) as e:
+            futures_warning = str(e)
 
     return {
         "as_of_date": as_of_date,
         "stock": stock,
         "futures_symbol": futures_symbol,
+        "futures_warning": futures_warning,
         "config": {"basis_alert_pct": basis_alert_pct},
         "session": ReplaySession(
             payloads, start, step_seconds, futures_payloads
@@ -276,6 +315,11 @@ def run(args, replay: dict | None = None) -> int:
         now = session.now
         sleep = lambda _seconds: None
         print(f"[settlement_monitor] 離線重播 {replay['as_of_date']}")
+        if replay["futures_warning"]:
+            print(
+                "[warn] 期貨 replay 來源無效: "
+                f"{replay['futures_warning']}；已停用選用期貨路徑"
+            )
     else:
         cfg = load_config()
         session = make_session()
@@ -295,6 +339,8 @@ def run(args, replay: dict | None = None) -> int:
         if replay_mode:
             raise ReplaySourceError("twse_spot: 沒有有效報價") from e
         raise
+    if replay_mode and not (q0["last"] or q0["prev_close"]):
+        raise ReplaySourceError("twse_spot: 沒有有效現貨價格")
     if not (q0["limit_up"] and q0["limit_dn"]):
         print("[warn] 抓不到漲跌停價，鎖定區間無法計算（收盤後測試屬正常）")
     print(f"[settlement_monitor] {args.stock} {q0['name']}｜昨收 {q0['prev_close']}"
@@ -310,7 +356,9 @@ def run(args, replay: dict | None = None) -> int:
     samples: list[float] = []
     last_price = q0["last"] or q0["prev_close"]
     locked_announced = False
-    futures_enabled = bool(args.futures_symbol)
+    futures_enabled = bool(args.futures_symbol) and not (
+        replay_mode and replay["futures_warning"]
+    )
     n_iter = 0
 
     while True:
