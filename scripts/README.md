@@ -60,7 +60,7 @@ python dividend_spread.py --replay ..\tests\fixtures\dividend_spread\happy_path
 ```
 
 ### settlement_monitor.py（SOP-3/4）
-結算日 12:30 起每 5 秒抓現貨即時價（TWSE MIS），維護 661 樣本的累計均值與
+結算日 12:30（不含，第一筆 12:30:05）起每 5 秒抓現貨即時價（TWSE MIS），維護 661 樣本的累計均值與
 「剩餘樣本全走漲/跌停」的**鎖定區間**；區間寬 < 1 tick 時警報並顯示模型區間參考。
 - `--futures-symbol <TAIFEX代號>` 加開 SOP-4 期現價差監控（>0.5% 警報）
 - `--force --max-iter 3` = 盤後測試模式

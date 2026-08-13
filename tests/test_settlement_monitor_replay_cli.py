@@ -208,11 +208,11 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
 
         self.assertEqual(observed, expected, stderr)
 
-    def test_replay_rejects_spot_sequence_outside_settlement_window(self):
+    def test_replay_rejects_spot_sequence_at_excluded_window_boundary(self):
         with copied_replay_case(HAPPY_PATH) as case_dir:
             spot_path = case_dir / "twse_spot.json"
             fixture = json.loads(spot_path.read_text(encoding="utf-8"))
-            fixture["start"] = "2026-08-19T12:31:00+08:00"
+            fixture["start"] = "2026-08-19T12:30:00+08:00"
             spot_path.write_text(
                 json.dumps(fixture, ensure_ascii=False), encoding="utf-8"
             )
@@ -222,7 +222,7 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
         observed = {
             "nonzero_exit": result.returncode != 0,
             "source_named": "twse_spot" in stderr,
-            "fixed_window_reported": "start 必須是 12:30:00" in stderr,
+            "fixed_window_reported": "start 必須是 12:30:05" in stderr,
             "traceback_hidden": "Traceback" not in stderr,
         }
         expected = {
@@ -230,6 +230,33 @@ class SettlementMonitorReplayCliTest(unittest.TestCase):
             "source_named": True,
             "fixed_window_reported": True,
             "traceback_hidden": True,
+        }
+
+        self.assertEqual(observed, expected, stderr)
+
+    def test_replay_uses_stock_futures_tick_above_one_thousand(self):
+        with copied_replay_case(HAPPY_PATH) as case_dir:
+            spot_path = case_dir / "twse_spot.json"
+            fixture = json.loads(spot_path.read_text(encoding="utf-8"))
+            for run in fixture["runs"]:
+                quote = run["payload"]["msgArray"][0]
+                quote.update(
+                    {"z": "1200", "y": "1200", "u": "1201", "w": "1199"}
+                )
+            spot_path.write_text(
+                json.dumps(fixture, ensure_ascii=False), encoding="utf-8"
+            )
+            result = run_replay(case_dir)
+
+        stdout = result.stdout.decode("utf-8", errors="replace")
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        observed = {
+            "returncode": result.returncode,
+            "one_point_tick": "參考跳動刻度：1199 至 1200" in stdout,
+        }
+        expected = {
+            "returncode": 0,
+            "one_point_tick": True,
         }
 
         self.assertEqual(observed, expected, stderr)

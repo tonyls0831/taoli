@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """SOP-3/4 結算日監控器：即時結算均價 + 鎖定區間 +（可選）期現價差。
 
-原理：股票期貨結算價 = 結算日 12:30–13:25 現貨每 5 秒快照（660 個）
+原理：股票期貨結算價 = 結算日 12:30（不含）–13:25 現貨每 5 秒快照（660 個）
 ＋ 13:30 收盤價，共 661 個數字的算術平均。
 本腳本每 5 秒抓一次現貨即時價，維護：
   - 目前累計均值 M
@@ -197,9 +197,9 @@ def load_replay_case(case_dir: Path) -> dict:
     if start.date() != as_of_date:
         raise ReplaySourceError("twse_spot: start 日期與 as_of_date 不一致")
     if (start.hour, start.minute, start.second, start.microsecond) != (
-        12, 30, 0, 0
+        12, 30, 5, 0
     ):
-        raise ReplaySourceError("twse_spot: start 必須是 12:30:00")
+        raise ReplaySourceError("twse_spot: start 必須是 12:30:05")
     if len(payloads) != TOTAL_SAMPLES + 1:
         raise ReplaySourceError(
             f"twse_spot: 必須提供初始報價與 {TOTAL_SAMPLES} 筆樣本"
@@ -249,7 +249,7 @@ def load_replay_case(case_dir: Path) -> dict:
 
 
 def tick_size(price: float) -> float:
-    for bound, tick in ((10, 0.01), (50, 0.05), (100, 0.1), (500, 0.5), (1000, 1)):
+    for bound, tick in ((10, 0.01), (50, 0.05), (100, 0.1), (500, 0.5), (2500, 1)):
         if price < bound:
             return tick
     return 5.0
@@ -356,12 +356,12 @@ def run(args, replay: dict | None = None) -> int:
         print("[warn] 抓不到漲跌停價，鎖定區間無法計算（收盤後測試屬正常）")
     print(f"[settlement_monitor] {args.stock} {q0['name']}｜昨收 {q0['prev_close']}"
           f"｜漲停 {q0['limit_up']}｜跌停 {q0['limit_dn']}")
-    print(f"結算均價 = 12:30–13:25 每 5 秒快照 660 個 + 收盤價，共 {TOTAL_SAMPLES} 個的平均\n")
+    print(f"結算均價 = 12:30（不含）–13:25 每 5 秒快照 660 個 + 收盤價，共 {TOTAL_SAMPLES} 個的平均\n")
 
-    start = now().replace(hour=12, minute=30, second=0, microsecond=0)
+    start = now().replace(hour=12, minute=30, second=5, microsecond=0)
     if now() < start and not args.force:
         wait = (start - now()).total_seconds()
-        print(f"等待 12:30 開始取樣（{wait / 60:.1f} 分鐘）…")
+        print(f"等待 12:30:05 開始取樣（{wait / 60:.1f} 分鐘）…")
         sleep(max(0, wait))
 
     samples: list[float] = []
