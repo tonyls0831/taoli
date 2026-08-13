@@ -1,12 +1,11 @@
 import os
-import socketserver
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
-from contextlib import contextmanager
 from pathlib import Path
+
+from tests.replay_safety import file_snapshot, recording_proxy
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,10 +16,6 @@ SUSPENSION_FIXTURE = FIXTURE_DIR / "taipei_suspension.html"
 MISSING_TAIPEI_FIXTURE = FIXTURE_DIR / "missing_taipei.html"
 CONFIG = ROOT / "scripts" / "config.json"
 DATA_DIR = ROOT / "data"
-
-
-def file_snapshot(path: Path) -> bytes | None:
-    return path.read_bytes() if path.exists() else None
 
 
 def run_fixture_cli(
@@ -53,26 +48,6 @@ def run_fixture_cli(
         timeout=10,
         check=False,
     )
-
-
-class RecordingProxyHandler(socketserver.BaseRequestHandler):
-    def handle(self):
-        self.server.connection_count += 1
-        self.request.recv(1024)
-        self.request.sendall(b"HTTP/1.1 502 Offline Replay\r\nContent-Length: 0\r\n\r\n")
-
-
-@contextmanager
-def recording_proxy():
-    with socketserver.TCPServer(("127.0.0.1", 0), RecordingProxyHandler) as server:
-        server.connection_count = 0
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            yield server
-        finally:
-            server.shutdown()
-            thread.join()
 
 
 class TyphoonFixtureCliTest(unittest.TestCase):

@@ -44,10 +44,18 @@ python typhoon_watch.py --once --source-file ..\tests\fixtures\dgpa\taipei_norma
 4. 對照 TAIFEX 盤後實際近/次月收盤價差
 5. 兩種警報：合理價差**與上次比跳動 ≥10 點**（＝除息日估計可能跨過結算日邊界，是原策略關注條件）；市場價差**偏離合理值 ≥8 點**
 6. 報告寫入 `data/除權息價差_日期.md`，狀態存 `data/dividend_spread_state.json`
+- `--replay <case-dir>` = 依 `scenario.json` 與原始 TWSE／TAIFEX fixtures 做離線重播；
+  固定資料日期，只輸出 console，不連網、不讀寫設定、報告或狀態，也不蜂鳴或推播
 - ⚠️ 只算「已公告」的除權息。次月桶常低估（例：台積電季配息未公告前 D_cross 會偏小），
   警報訊息已附此提醒；馬克羊的完整版還會人工預估未公告的大權值股
 - ⚠️ 崩盤日價差會嚴重錯位（2026-07-17 實測：大盤 -6.5%，次月價差 +250 點），
   此時警報只表示市場狀態異常，不能直接解讀為部位條件
+
+離線重播範例：
+
+```powershell
+python dividend_spread.py --replay ..\tests\fixtures\dividend_spread\happy_path
+```
 
 ### settlement_monitor.py（SOP-3/4）
 結算日 12:30 起每 5 秒抓現貨即時價（TWSE MIS），維護 661 樣本的累計均值與
