@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this project live as GitHub issues in the private repository `tonyls0831/taoli`.
+Issues and PRDs for this project live as GitHub issues in the public repository `tonyls0831/taoli`.
 
 The local `origin` remote points to `https://github.com/tonyls0831/taoli.git`. In Codex, prefer the connected GitHub app for issue and pull-request operations. Use the `gh` CLI for operations the app does not expose; when repository inference is unavailable, pass `--repo tonyls0831/taoli` explicitly.
 

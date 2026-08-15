@@ -95,7 +95,7 @@ project context; the tracked files above are the durable source.
 ## Git and external writes
 
 - Preserve unrelated user changes and inspect the diff before committing.
-- The private GitHub repository is `tonyls0831/taoli`; local remote `origin`
+- The public GitHub repository is `tonyls0831/taoli`; local remote `origin`
   points to `https://github.com/tonyls0831/taoli.git`.
 - Creating or modifying GitHub issues, PRs, labels, or remotes is an external
   write and requires an explicit user request.
