@@ -1,6 +1,6 @@
 # Taoli project context
 
-最後更新：2026-08-13
+最後更新：2026-08-15
 
 ## 專案定位
 
@@ -19,6 +19,7 @@ Taoli 是一個以 Obsidian 為載體的交易策略研究 vault。現有材料�
 - Phase 5 已完成第一輪 Codex-native Issue → TDD → branch → CI → review → squash merge 流程；GitHub Issue #1 已關閉，PR #2 合併為 `a8347d83dd450cceb48d04e7b783aa494ebb4d12`，Python 3.10／3.14 CI 皆通過。第一個 public seam 是 `typhoon_watch.py --once --source-file <fixture.html>`。
 - Phase 6–9 的遷移完成標準、治理與驗收路線已由 repository owner 於 2026-08-12 核准，正式規格見 `docs/codex-migration-completion-plan.md`；後續工作由 GitHub Issue #3 與 child Issues #4–#20 管理。
 - Phase 8 已於 2026-08-13 對四支工具的 DGPA、TWSE、TAIFEX 與 Yahoo 資料路徑做 bounded live-read 再認證；逐端點結果、fixture 差異與保留限制見 `docs/public-source-recertification-2026-08-13.md`。
+- Phase 7 repository governance 於 2026-08-15 完成解除方案限制：owner 明確授權將 repository 改為 public，`main` 已強制 required PR、strict Python 3.10／3.14 checks、administrator enforcement，並禁止 force push 與 branch deletion；設定與阻擋證據見 `docs/repository-governance.md`。
 - Claude 的寬鬆 shell allowlist、一次性暫存路徑與舊 whisper.cpp scratchpad 沒有遷入 Codex。
 
 ## 已保存的研究材料
@@ -74,4 +75,4 @@ Claude-era 紀錄顯示四支工具曾於 2026-07-17 對真實資料執行；Pha
 - GitHub Actions 會在 `main` push 與 pull request 上以 Python 3.10／3.14 執行離線測試與 compile，並以 Python 3.14 parse Codex TOML。
 - 每年颱風季與除權息季前重新驗證資料解析器。
 - 若未來評估券商 API 或自動下單，應視為獨立、高風險專案決策，不是現有腳本的自然延伸。
-- Private GitHub repository 與 issue tracker 位於 `tonyls0831/taoli`，本機以 `origin` 連接；相關規範見 `docs/agents/issue-tracker.md`。
+- Public GitHub repository 與 issue tracker 位於 `tonyls0831/taoli`，本機以 `origin` 連接；相關規範見 `docs/agents/issue-tracker.md`。
