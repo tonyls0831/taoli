@@ -78,3 +78,23 @@ venv；temporary root 的 leaf name 是
 
 結論：tracked files 足以在新的 Windows Python 3.14 環境完成安裝與完整離線驗證；
 原先的 timezone hidden dependency 已修復。Python 3.10 由 PR CI matrix 另行驗證。
+
+## Closeout delta audit
+
+稽核日期：2026-08-20（Asia/Taipei）
+
+Issue #20 closeout 在加入本段 evidence 前固定於
+`4be3058b13935cac3aecdcfdffe91595edcd4e16`；範圍為 123 個 tracked files，以及
+所有 refs 可達的 21 個 commits。掃描仍只輸出類別、計數與 pathname，不輸出匹配值；
+涵蓋 private-key block、GitHub／AWS／Slack token、Discord webhook、Telegram bot token、
+JWT、credentialed URL、常見 non-empty credential assignment，以及 initial audit 所列的
+敏感檔名類別。
+
+結果：固定 commit 的 tracked tree 與完整 reachable history 都是 0 個 pattern finding、
+0 個敏感 pathname。加入本段與條件式 completion wording 後，又對待提交 working tree 的
+tracked files 重跑相同 value-suppressing scan，結果仍為 0；本次 closeout 沒有新增 executable、
+fixture、credential、config、runtime state 或 secret-bearing artifact。
+
+因此 initial audit 至 closeout 之間的 tracked delta 已納入機密稽核。Claude JSONL、memory、
+`.claude/`、本機 `scripts/config.json` 與其他 ignored artifacts 不在 tracked scope，沒有被
+讀取或顯示；其保留與非 runtime-dependency 決策見 `docs/project-context.md`。
