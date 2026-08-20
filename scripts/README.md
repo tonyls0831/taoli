@@ -8,6 +8,7 @@
 - Python 3.10+（本機 3.14 已測通過）
 - 從 repository 根目錄安裝 tracked runtime dependencies：
   `python -m pip install --disable-pip-version-check -r requirements.txt`
+- 以下命令均從 repository 根目錄執行。
 - 第一次執行任一腳本會自動產生 `config.json`；要手機推播就填：
   - `discord_webhook`：Discord 頻道 → 整合 → Webhook → 複製網址（最簡單）
   - 或 `telegram_bot_token` + `telegram_chat_id`
@@ -17,10 +18,10 @@
 
 | 腳本 | 對應 SOP | 跑法 | 什麼時候跑 |
 |---|---|---|---|
-| `typhoon_watch.py` | SOP-1 颱風假 | `python typhoon_watch.py --fast` | 颱風可能襲台的**週二 19:40 起**掛著（平時可用預設 30s 間隔） |
-| `dividend_spread.py` | SOP-2 遠近月價差 | `python dividend_spread.py` | 除權息季（6–8月）每天收盤後或盤前跑一次 |
-| `settlement_monitor.py` | SOP-3/4 結算微結構＋期現收斂 | `python settlement_monitor.py --stock 2603` | **每月第三個週三** 12:25 前開著 |
-| `morning_brief.py` | SOP-5 盤前功課 | `python morning_brief.py` | 每個交易日早上 07:00–08:20 |
+| `typhoon_watch.py` | SOP-1 颱風假 | `python scripts/typhoon_watch.py --fast` | 颱風可能襲台的**週二 19:40 起**掛著（平時可用預設 30s 間隔） |
+| `dividend_spread.py` | SOP-2 遠近月價差 | `python scripts/dividend_spread.py` | 除權息季（6–8月）每天收盤後或盤前跑一次 |
+| `settlement_monitor.py` | SOP-3/4 結算微結構＋期現收斂 | `python scripts/settlement_monitor.py --stock 2603` | **每月第三個週三** 12:25 前開著 |
+| `morning_brief.py` | SOP-5 盤前功課 | `python scripts/morning_brief.py` | 每個交易日早上 07:00–08:20 |
 
 ## 各腳本說明
 
@@ -36,7 +37,7 @@
 離線重播範例：
 
 ```powershell
-python typhoon_watch.py --once --source-file ..\tests\fixtures\dgpa\taipei_normal.html
+python scripts/typhoon_watch.py --once --source-file tests/fixtures/dgpa/taipei_normal.html
 ```
 
 ### dividend_spread.py（SOP-2）
@@ -56,7 +57,7 @@ python typhoon_watch.py --once --source-file ..\tests\fixtures\dgpa\taipei_norma
 離線重播範例：
 
 ```powershell
-python dividend_spread.py --replay ..\tests\fixtures\dividend_spread\happy_path
+python scripts/dividend_spread.py --replay tests/fixtures/dividend_spread/happy_path
 ```
 
 ### settlement_monitor.py（SOP-3/4）
@@ -72,7 +73,7 @@ python dividend_spread.py --replay ..\tests\fixtures\dividend_spread\happy_path
 離線重播範例：
 
 ```powershell
-python settlement_monitor.py --replay ..\tests\fixtures\settlement_monitor\happy_path
+python scripts/settlement_monitor.py --replay tests/fixtures/settlement_monitor/happy_path
 ```
 
 ### morning_brief.py（SOP-5）
@@ -89,7 +90,7 @@ python settlement_monitor.py --replay ..\tests\fixtures\settlement_monitor\happy
 離線重播範例：
 
 ```powershell
-python morning_brief.py --replay ..\tests\fixtures\morning_brief\happy_path `
+python scripts/morning_brief.py --replay tests/fixtures/morning_brief/happy_path `
   --output-dir $env:TEMP\taoli-morning-brief-replay
 ```
 
