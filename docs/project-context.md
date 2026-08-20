@@ -8,13 +8,14 @@ Taoli 是一個以 Obsidian 為載體的交易策略研究 vault。現有材料�
 
 本專案目前只做研究、監控、計算、報告與通知；不連接券商，也不自動下單。
 
-## Codex 遷移 closeout 與歷程
+## Codex 遷移完成與歷程
 
-**完成宣告尚未生效。** 本次 Issue #20 變更先保存 Definition of Done、closeout audit、
-已知限制與 maintenance 入口；它合併至 `main` 且該 commit 的 required CI 全綠後，再由
-一個最小 activation PR 記錄實際完成日期與 closeout PR／commit／CI。Activation PR
-合併且 main CI 全綠後才宣告 Codex migration complete，並關閉 Issue #20 與 tracking
-Issue #3。在此之前，兩張 migration Issues 保持 open，不把準備中的 branch 寫成已完成歷史。
+**Codex migration complete：2026-08-21。** 這項宣告在包含本段的 activation commit
+合併至 `main`，且該 commit 的 required CI 全綠時生效。Closeout evidence 已由 PR #33、
+squash commit `f4325e4ee4e4ae4dd3fb7042faf4aac067496c73`、PR CI run `32389723565`
+與 main CI run `32389834206` 驗證；activation 是唯一剩餘 gate。生效後關閉 Issue #20
+與 tracking Issue #3，Phase 6–9 migration backlog 結束。後續工程工作改走一般 GitHub
+Issues，不再用 migration Phase 編號管理。
 
 Cold-start acceptance 由全新的 repository-only Codex task 完成 Issue #19；交付為 PR #30、
 squash commit `9b47febb94ff973440055bd81abf2b327b4dca18`。PR CI run
@@ -47,7 +48,7 @@ tracked repository context 與 ticket 前進，沒有讀取 Claude chat 或 memo
 | 7 | 乾淨環境可重建 | 同一 audit 記錄 fresh temporary clone、tracked `requirements.txt`、tests、compile、TOML parse 與 clean worktree 全部通過。 |
 | 8 | 真實資料再認證 | Issues #14–#18／PR #27 與 `docs/public-source-recertification-2026-08-13.md` 保存日期、來源、shape、分類、修正與限制。 |
 | 9 | Cold-start 驗收 | Issue #19／PR #30、commit `9b47febb94ff973440055bd81abf2b327b4dca18`、PR CI `32388037914`、main CI `32388156302`。 |
-| 10 | 無遷移 blocker | Issues #4–#19 均已關閉，非阻擋外部來源限制已轉為一般 maintenance Issues #31、#32；剩餘 gate 只有本次 evidence PR 與其後的 activation PR／main CI，完成後才關閉 #20／#3。 |
+| 10 | 無遷移 blocker | Issues #4–#19 均已關閉；PR #33／commit `f4325e4`／main CI `32389834206` 完成 closeout evidence；外部來源限制已轉為 maintenance Issues #31、#32。包含本段的 activation commit 與其 main CI 是唯一剩餘 gate，通過後關閉 #20／#3。 |
 
 ## 已保存的研究材料
 
