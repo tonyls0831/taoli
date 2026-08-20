@@ -1,6 +1,6 @@
 # Taoli project context
 
-最後更新：2026-08-15
+最後更新：2026-08-21
 
 ## 專案定位
 
@@ -8,7 +8,19 @@ Taoli 是一個以 Obsidian 為載體的交易策略研究 vault。現有材料�
 
 本專案目前只做研究、監控、計算、報告與通知；不連接券商，也不自動下單。
 
-## Codex 遷移狀態
+## Codex 遷移 closeout 與歷程
+
+**完成宣告尚未生效。** 本次 Issue #20 變更先保存 Definition of Done、closeout audit、
+已知限制與 maintenance 入口；它合併至 `main` 且該 commit 的 required CI 全綠後，再由
+一個最小 activation PR 記錄實際完成日期與 closeout PR／commit／CI。Activation PR
+合併且 main CI 全綠後才宣告 Codex migration complete，並關閉 Issue #20 與 tracking
+Issue #3。在此之前，兩張 migration Issues 保持 open，不把準備中的 branch 寫成已完成歷史。
+
+Cold-start acceptance 由全新的 repository-only Codex task 完成 Issue #19；交付為 PR #30、
+squash commit `9b47febb94ff973440055bd81abf2b327b4dca18`。PR CI run
+`32388037914` 與 main CI run `32388156302` 的 Python 3.10／3.14 均通過。該 task 只靠
+tracked repository context 與 ticket 前進，沒有讀取 Claude chat 或 memory；它找到並修正
+`scripts/README.md` 未明示 repository-root 執行位置的 context gap。
 
 - Phase 0 已建立 Git baseline：`45bcb6e55f3184257ad92b7db65f0d9efbe27146`。
 - Phase 1 已執行 Claude Code chat import；Claude 的本機原始 JSONL 與 memory 仍保留於 `%USERPROFILE%\.claude\projects\D--obsidian-vaults-taoli`，但它們不再是執行期依賴。
@@ -21,6 +33,21 @@ Taoli 是一個以 Obsidian 為載體的交易策略研究 vault。現有材料�
 - Phase 8 已於 2026-08-13 對四支工具的 DGPA、TWSE、TAIFEX 與 Yahoo 資料路徑做 bounded live-read 再認證；逐端點結果、fixture 差異與保留限制見 `docs/public-source-recertification-2026-08-13.md`。
 - Phase 7 repository governance 於 2026-08-15 完成解除方案限制：owner 明確授權將 repository 改為 public，`main` 已強制 required PR、strict Python 3.10／3.14 checks、administrator enforcement，並禁止 force push 與 branch deletion；設定與阻擋證據見 `docs/repository-governance.md`。
 - Claude 的寬鬆 shell allowlist、一次性暫存路徑與舊 whisper.cpp scratchpad 沒有遷入 Codex。
+
+### Definition of Done 證據
+
+| # | 條件 | 可追溯證據 |
+|---|---|---|
+| 1 | Repository 可獨立理解 | `AGENTS.md`、`CONTEXT.md`、本文件與 Issue #19／PR #30 的 repository-only cold start。 |
+| 2 | 單一正式工作入口 | GitHub Issue #3 與 child Issues #4–#20；入口、templates 與 PR 邊界見 `docs/repository-governance.md`、PR #25。 |
+| 3 | 重複交付證據 | Phase 5 Issue #1／PR #2 之外，Issues #4、#6、#8、#10 與 #19 都完成 TDD、review、PR、CI 與 squash merge。 |
+| 4 | 確定性離線驗證 | 四支工具的 public replay seams 與代表性成功／失敗／side-effect safety cases 由 PRs #21–#24 交付，使用方式見 `scripts/README.md`。 |
+| 5 | 支援版本受保護 | Issue #12／PR #29；`main` 強制 strict `Python 3.10`、`Python 3.14`、required PR 與 administrator enforcement。暫時 PR #28 證明 failed checks 會阻擋 merge。 |
+| 6 | 機密狀態清楚 | Issue #13／PR #26 與 `docs/security-and-reproducibility-audit.md`：initial audit、closeout delta audit、tracked tree、reachable history 與 ignore coverage 都完成不輸出值的檢查。 |
+| 7 | 乾淨環境可重建 | 同一 audit 記錄 fresh temporary clone、tracked `requirements.txt`、tests、compile、TOML parse 與 clean worktree 全部通過。 |
+| 8 | 真實資料再認證 | Issues #14–#18／PR #27 與 `docs/public-source-recertification-2026-08-13.md` 保存日期、來源、shape、分類、修正與限制。 |
+| 9 | Cold-start 驗收 | Issue #19／PR #30、commit `9b47febb94ff973440055bd81abf2b327b4dca18`、PR CI `32388037914`、main CI `32388156302`。 |
+| 10 | 無遷移 blocker | Issues #4–#19 均已關閉，非阻擋外部來源限制已轉為一般 maintenance Issues #31、#32；剩餘 gate 只有本次 evidence PR 與其後的 activation PR／main CI，完成後才關閉 #20／#3。 |
 
 ## 已保存的研究材料
 
@@ -61,6 +88,15 @@ Claude-era 紀錄顯示四支工具曾於 2026-07-17 對真實資料執行；Pha
 - 通知設定可以留空；console 輸出仍可使用。
 - 目前沒有券商 API、帳戶金鑰、下單模組或自動化部位管理。
 
+## Claude 歷史保留決策
+
+Claude Code 的本機原始 JSONL 與 memory 明確保留在
+`%USERPROFILE%\.claude\projects\D--obsidian-vaults-taoli`，作為歷史資料，不刪除、不搬移、
+不匯入 Git；repository 的 `/.claude/` 仍受 ignore rule 保護。現行 scripts、tests、CI、
+Issue workflow 與 clean-clone 安裝都不讀取這些資料，`.claude/settings.local.json` 的舊
+allowlist 也不是 Codex permission policy。未來若要封存或刪除，必須另行取得明確授權，
+不屬於 migration 或一般程式維護的預設動作。
+
 ## 已知限制與重新驗證條件
 
 - 市場規則、結算公式、休市辦法或商品規格變更時，先更新規則前提，再評估程式和 SOP。
@@ -68,9 +104,20 @@ Claude-era 紀錄顯示四支工具曾於 2026-07-17 對真實資料執行；Pha
 - 遠近月價差模型受未公告除息資訊、預估日變動、利率、避險需求與流動性影響。
 - 2026-07-17 曾出現台股急跌而次月價差約 `+250` 點的異常案例；警報可能代表市場狀態異常，而不是可直接進場的機會。
 - 公開資料錯誤、延遲或缺漏時，工具應失敗得清楚，不能以舊值假裝即時值。
+- DGPA 於 2026-08-13 只有無城市公告狀態可供 live 驗證；活動公告的 city-row markup
+  留待 maintenance Issue #31 在事件發生且取得 bounded-read 授權後再認證。
+- 選用 TAIFEX MIS 股期報價在 2026-08-13 回傳 HTTP 400，尚未證明 live payload shape；
+  maintenance Issue #32 追蹤重新驗證、替換、停用或保留 owner-accepted limitation。
+- Yahoo Finance 沒有官方 SLA；除權息模型只涵蓋已公告事件。這些是明示的資料／模型限制，
+  不以歷史 fixtures 或舊值假裝即時完整性。
 
-## 後續工作邊界
+## 維護入口與後續工作邊界
 
+- 一般維護、bug、研究工具改動與資料來源再認證都從 GitHub Issues 進入；使用
+  `.github/ISSUE_TEMPLATE/engineering-task.yml` 記錄 spec、public seam、validation、
+  安全與 external-write authorization，再依 `docs/agents/issue-tracker.md` triage。
+- Migration Phase 編號停止使用。Issue #31 與 #32 是第一批由 closeout 轉出的普通
+  maintenance tickets；它們不阻擋 Codex migration complete。
 - 持續為其餘公開資料路徑建立自動化測試與可重播 fixtures，降低對即時端點的驗證依賴。
 - GitHub Actions 會在 `main` push 與 pull request 上以 Python 3.10／3.14 執行離線測試與 compile，並以 Python 3.14 parse Codex TOML。
 - 每年颱風季與除權息季前重新驗證資料解析器。
